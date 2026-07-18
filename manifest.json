@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Phishing Extension MVP",
+  "version": "1.0.0",
+  "description": "Local MVP extension for detecting suspicious page indicators.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage"],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/fonts/*.ttf", "assets/images/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"]
+    }
+  ]
+}

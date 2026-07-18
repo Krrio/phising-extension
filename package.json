@@ -1,0 +1,27 @@
+{
+  "name": "phishing-extension",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:js": "esbuild src/content.ts src/popup.ts --bundle --outdir=dist --format=iife --target=chrome110",
+    "build:css": "tailwindcss -i ./src/styles/input.css -o ./dist/styles.css --minify",
+    "build": "npm run typecheck && npm run build:js && npm run build:css",
+    "watch:js": "esbuild src/content.ts src/popup.ts --bundle --outdir=dist --format=iife --target=chrome110 --watch",
+    "watch:css": "tailwindcss -i ./src/styles/input.css -o ./dist/styles.css --watch",
+    "watch": "npm run watch:js & npm run watch:css",
+    "test": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.2",
+    "@types/chrome": "^0.2.2",
+    "esbuild": "^0.28.1",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}
