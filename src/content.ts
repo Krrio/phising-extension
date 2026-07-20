@@ -216,16 +216,16 @@ async function init() {
 const observerOptions = { childList: true, subtree: true, characterData: true };
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-const pendingNodes: Node[] = [];
+const pendingNodes = new Set<Node>();
 
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     if (mutation.type === "childList") {
       for (const addedNode of Array.from(mutation.addedNodes)) {
         if (addedNode.nodeType === Node.ELEMENT_NODE) {
-          pendingNodes.push(addedNode);
+          pendingNodes.add(addedNode);
         } else if (addedNode.parentElement) {
-          pendingNodes.push(addedNode.parentElement);
+          pendingNodes.add(addedNode.parentElement);
         }
       }
     }
@@ -233,7 +233,7 @@ const observer = new MutationObserver((mutations) => {
     if (mutation.type === "characterData") {
       const parent = mutation.target.parentElement;
       if (parent) {
-        pendingNodes.push(parent);
+        pendingNodes.add(parent);
       }
     }
   }
@@ -246,7 +246,7 @@ const observer = new MutationObserver((mutations) => {
     for (const node of pendingNodes) {
       scanRiskIndicators(node);
     }
-    pendingNodes.length = 0;
+    pendingNodes.clear();
 
     observer.observe(document.body, observerOptions);
   }, 300);

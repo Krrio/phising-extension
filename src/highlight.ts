@@ -120,6 +120,13 @@ export function scanElement(root: Node): void {
     const parent = node.parentElement;
     if (!parent) return;
     if (skippedElements.includes(parent.tagName)) return;
+    if (
+      parent.closest("#pg-panel") ||
+      parent.closest("#pg-selection-icon") ||
+      parent.closest("mark[data-phishing-mark]")
+    ) {
+      return;
+    }
     if (parent.closest("#pg-panel") || parent.closest("#pg-selection-icon"))
       return;
     highlightedNode(node);

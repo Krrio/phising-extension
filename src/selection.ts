@@ -1,4 +1,5 @@
-import { analyzeSelection } from "./analyze";
+import { findAnalysisRoot } from "./analysisScope";
+import { analyzeElement, analyzeSelection } from "./analyze";
 import {
   injectMarkStyle,
   removeHighlights,
@@ -14,6 +15,7 @@ let lastCount = 0;
 let lastPhrases: string[] = [];
 let lastRange: Range | null = null;
 let lastContainer: Element | null = null;
+let lastAnalysisRoot: Element | null = null;
 
 function injectSpinnerStyle() {
   const styleId = "pg-spinner-style";
@@ -247,7 +249,8 @@ function createPanel(
     button.style.color = "white";
     button.style.cursor = "pointer";
     button.addEventListener("click", async () => {
-      if (!lastContainer || !lastRange) return;
+      if (level === "full" && !lastAnalysisRoot) return;
+      if (level !== "full" && (!lastContainer || !lastRange)) return;
 
       const originalText = button.textContent;
       button.textContent = "";
@@ -258,12 +261,15 @@ function createPanel(
       button.style.opacity = "0.6";
 
       try {
-        const result = await analyzeSelection(
-          lastContainer,
-          lastRange,
-          lastSelectedText,
-          lastPhrases,
-        );
+        const result =
+          level === "full"
+            ? await analyzeElement(lastAnalysisRoot!)
+            : await analyzeSelection(
+                lastContainer!,
+                lastRange!,
+                lastSelectedText,
+                lastPhrases,
+              );
         const resultBox = panel.querySelector<HTMLElement>(".pg-result");
         if (resultBox) renderResult(resultBox, result);
       } catch (error) {
@@ -369,6 +375,7 @@ export function initSelectionListener() {
         container = container.parentElement!;
       }
       lastContainer = container as Element;
+      lastAnalysisRoot = findAnalysisRoot(lastContainer);
 
       showIcon(range, found.length);
       highlightSelection(range);
@@ -388,6 +395,7 @@ export function initSelectionListener() {
     const container = mark.parentElement;
     if (!container) return;
     lastContainer = container;
+    lastAnalysisRoot = findAnalysisRoot(mark);
     lastSelectedText = container.textContent ?? "";
     lastPhrases = suspiciousWords.filter((w) =>
       lastSelectedText.toLowerCase().includes(w.toLowerCase()),
