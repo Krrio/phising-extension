@@ -31,12 +31,12 @@ class AnalyzeResponse(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     categories: list[Literal[
-    "credential_request",   # prośba o hasło / dane logowania
-    "urgency",              # presja czasowa ("natychmiast", "konto wygasa")
-    "impersonation",        # podszywanie się pod markę lub osobę
-    "suspicious_link",      # link prowadzący gdzie indziej niż tekst
-    "suspicious_domain",    # domena-podróbka (paypa1.com)
-    "financial",            # wyłudzenie pieniędzy / danych płatniczych
+    "credential_request",
+    "urgency",
+    "impersonation",
+    "suspicious_link",
+    "suspicious_domain",
+    "financial",
 ]]
 
 @app.post("/analyze")
