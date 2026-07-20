@@ -85,12 +85,12 @@ Oceniaj wszystkie sygnały w kontekście, w szczególności:
 * czy nakłania do zalogowania się lub kliknięcia linku,
 * czy link lub domena pasują do deklarowanego nadawcy,
 * czy prośba jest typowa i logiczna w danym kontekście,
-* czy występuje podszywanie się pod firmę, instytucję lub konkretną osobę,
+* czy występuje impersonation się pod firmę, instytucję lub konkretną osobę,
 * czy pojedyncze słowa zostały wyrwane z neutralnego kontekstu.
 
 Skala `trustScore`:
 * 90–100: brak konkretnych oznak ryzyka; typowa, legalna komunikacja,
-* 70–89: drobne nietypowości; treść prawdopodobnie bezpieczna,
+* 70–89: drobne nietypowości; treść prawdopodobnie safe,
 * 40–69: mieszane lub niejednoznaczne sygnały; wymagana ostrożność,
 * 0–39: wyraźne i spójne oznaki phishingu.
 
