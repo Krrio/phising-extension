@@ -26,27 +26,25 @@ async function initAutonomyLevel() {
     await chrome.storage.local.set({ autonomyLevel: select.value });
   });
 }
-initAutonomyLevel();
 
-async function testCall() {
-  const test_data = {
-    content: "Urgent action required, verify your account",
-    signals: {
-      suspiciousPhrases: ["urgent action"],
-      linkMismatches: [],
-      suspiciousDomains: [],
-    },
-  };
+function initDashboardButton(): void {
+  const button = document.getElementById("openDashboard");
 
-  const answer = await fetch("http://localhost:8000/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(test_data),
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  button.addEventListener("click", async () => {
+    await chrome.tabs.create({
+      url: chrome.runtime.getURL("dashboard.html"),
+    });
+
+    window.close();
   });
-
-  const result = await answer.json();
-  console.log("Backend mowi:", result);
 }
 
+initDashboardButton();
+
+initAutonomyLevel();
+
 initToggle();
-testCall();

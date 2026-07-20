@@ -5,6 +5,7 @@
 backend/.env
 backend/.env.*
 !backend/.env.example
+backend/*.db
 
 # API keys, certificates and private credentials
 *.key

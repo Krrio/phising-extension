@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Historia analiz — Phishing Guard</title>
+    <link rel="stylesheet" href="dist/styles.css" />
+  </head>
+
+  <body class="min-h-screen bg-zinc-100 font-poppins text-zinc-900">
+    <header class="border-b border-zinc-200 bg-white">
+      <div class="mx-auto flex max-w-7xl items-center gap-3 px-5 py-4">
+        <img
+          src="assets/images/logo.svg"
+          alt="Phishing Guard"
+          class="h-8 w-8"
+        />
+        <span class="text-lg font-medium">Phishing Guard</span>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-5 py-8">
+      <div class="mb-6 flex items-center justify-between gap-4">
+        <h1 class="text-2xl font-semibold">Historia analiz</h1>
+        <span id="dashboardStatus" class="text-sm text-zinc-500">
+          Ładowanie danych...
+        </span>
+      </div>
+
+      <section class="mb-5 rounded-lg border border-zinc-200 bg-white p-5">
+        <h2 class="mb-4 text-base font-medium">Trust score w czasie</h2>
+        <div class="relative h-80">
+          <canvas id="trustScoreChart"></canvas>
+        </div>
+      </section>
+
+      <div class="grid gap-5 lg:grid-cols-2">
+        <section class="rounded-lg border border-zinc-200 bg-white p-5">
+          <h2 class="mb-4 text-base font-medium">Rozkład werdyktów</h2>
+          <div class="relative h-72">
+            <canvas id="verdictChart"></canvas>
+          </div>
+        </section>
+
+        <section class="rounded-lg border border-zinc-200 bg-white p-5">
+          <h2 class="mb-4 text-base font-medium">
+            Najczęstsze kategorie zagrożeń
+          </h2>
+          <div class="relative h-72">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script src="dist/dashboard.js"></script>
+  </body>
+</html>

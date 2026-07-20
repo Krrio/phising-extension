@@ -1,15 +1,31 @@
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
-from typing import Literal
-from openai import OpenAI
-from dotenv import load_dotenv
-from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import os
+from typing import Literal
+
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
+from pydantic import BaseModel, Field
+from sqlmodel import Session
+from history import router as history_router
+
+from database import (
+    AnalysisHistory,
+    create_db_and_tables,
+    get_session,
+)
 
 load_dotenv()
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    create_db_and_tables()
+    yield
+
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
+app.include_router(history_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
 
 class LinkMissmatch(BaseModel):
@@ -40,7 +56,10 @@ class AnalyzeResponse(BaseModel):
 ]]
 
 @app.post("/analyze")
-async def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+async def analyze(
+    request: AnalyzeRequest,
+    session: Session = Depends(get_session),
+) -> AnalyzeResponse:
 
     prompt = f"""
 [R — ROLA]
@@ -156,4 +175,23 @@ Jeśli nie wykryto konkretnej kategorii zagrożenia, zwróć pustą listę:
         response_format = AnalyzeResponse,
         temperature=0
     )
-    return odpowiedz.choices[0].message.parsed
+    result = odpowiedz.choices[0].message.parsed
+
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail="Model nie zwrócił poprawnego wyniku analizy.",
+        )
+
+    history_entry = AnalysisHistory(
+        trust_score=result.trustScore,
+        verdict=result.verdict,
+        confidence=result.confidence,
+        reasoning=result.reasoning,
+        categories=result.categories,
+    )
+
+    session.add(history_entry)
+    session.commit()
+
+    return result
