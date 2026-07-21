@@ -26,7 +26,17 @@ async def lifespan(_: FastAPI):
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 app = FastAPI(lifespan=lifespan)
 app.include_router(history_router)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "chrome-extension://ackfaohibedfakhaaffgkjfjcjmecghp",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+    allow_credentials=False,
+)
 
 class LinkMissmatch(BaseModel):
     text: str

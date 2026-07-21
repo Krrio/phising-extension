@@ -1,6 +1,29 @@
 import { extractHostname, hasLinkMismatch } from "./links";
+import type {
+  AnalyzeMessageResponse,
+  AnalyzePayload,
+  AnalyzeRequestMessage,
+  AnalyzeResult,
+} from "./messages";
 import { suspiciousWords } from "./phrases";
 import { isSuspiciousDomain } from "./suspiciousDomain";
+
+async function requestAnalysis(payload: AnalyzePayload): Promise<AnalyzeResult> {
+  const message: AnalyzeRequestMessage = { type: "ANALYZE", payload };
+  const response = (await chrome.runtime.sendMessage(
+    message,
+  )) as AnalyzeMessageResponse;
+
+  if (!response) {
+    throw new Error("Service worker did not return a response.");
+  }
+
+  if (!response.ok) {
+    throw new Error(response.error);
+  }
+
+  return response.data;
+}
 
 function collectLinks(element: Element): HTMLAnchorElement[] {
   const links = Array.from(element.querySelectorAll<HTMLAnchorElement>("a"));
@@ -12,13 +35,13 @@ function collectLinks(element: Element): HTMLAnchorElement[] {
   return Array.from(new Set(links));
 }
 
-export async function analyzeElement(element: Element) {
+export async function analyzeElement(element: Element): Promise<AnalyzeResult> {
   const content = element.textContent ?? "";
   const foundPhrases = suspiciousWords.filter((phrase) =>
     content.includes(phrase),
   );
 
-  const foundMismatches: { text: string; href: string }[] = [];
+  const foundMismatches: AnalyzePayload["signals"]["linkMismatches"] = [];
   const foundSuspiciousDomains = new Set<string>();
   const links = collectLinks(element);
 
@@ -36,8 +59,8 @@ export async function analyzeElement(element: Element) {
     }
   }
 
-  const payload = {
-    content: content,
+  const payload: AnalyzePayload = {
+    content,
     signals: {
       suspiciousPhrases: foundPhrases,
       linkMismatches: foundMismatches,
@@ -45,12 +68,7 @@ export async function analyzeElement(element: Element) {
     },
   };
 
-  const answer = await fetch("http://localhost:8000/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return await answer.json();
+  return requestAnalysis(payload);
 }
 
 export async function analyzeSelection(
@@ -58,8 +76,8 @@ export async function analyzeSelection(
   range: Range,
   selectedText: string,
   phrases: string[],
-) {
-  const foundMismatches: { text: string; href: string }[] = [];
+): Promise<AnalyzeResult> {
+  const foundMismatches: AnalyzePayload["signals"]["linkMismatches"] = [];
   const foundSuspiciousDomains = new Set<string>();
   const links = collectLinks(container);
 
@@ -79,7 +97,7 @@ export async function analyzeSelection(
     }
   }
 
-  const payload = {
+  const payload: AnalyzePayload = {
     content: selectedText,
     signals: {
       suspiciousPhrases: phrases,
@@ -88,10 +106,5 @@ export async function analyzeSelection(
     },
   };
 
-  const answer = await fetch("http://localhost:8000/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return await answer.json();
+  return requestAnalysis(payload);
 }
