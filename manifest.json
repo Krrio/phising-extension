@@ -10,7 +10,11 @@
     "service_worker": "dist/background.js"
   },
   "permissions": ["storage"],
-  "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*"],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "https://api.openai.com/*"
+  ],
   "web_accessible_resources": [
     {
       "resources": ["assets/fonts/*.ttf", "assets/images/*"],

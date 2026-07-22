@@ -97,3 +97,27 @@ def get_category_distribution(
             if category in counts:
                 counts[category] += 1
     return CategoryDistribution(**counts)
+
+
+class SaveHistoryRequest(BaseModel):
+    trustScore: int
+    verdict: str
+    confidence: float
+    reasoning: str
+    categories: list[str]
+
+@router.post("/save")
+def save_analysis(
+    entry: SaveHistoryRequest,
+    session: Session = Depends(get_session),
+):
+    history_entry = AnalysisHistory(
+        trust_score=entry.trustScore,
+        verdict=entry.verdict,
+        confidence=entry.confidence,
+        reasoning=entry.reasoning,
+        categories=entry.categories,
+    )
+    session.add(history_entry)
+    session.commit()
+    return {"ok": True}

@@ -43,8 +43,28 @@ function initDashboardButton(): void {
   });
 }
 
+async function initApiKey(): Promise<void> {
+  const inputElement = document.getElementById("apiKey");
+
+  if (!(inputElement instanceof HTMLInputElement)) {
+    return;
+  }
+
+  const stored = (await chrome.storage.local.get("apiKey")) as {
+    apiKey?: string;
+  };
+
+  inputElement.value = stored.apiKey ?? "";
+
+  inputElement.addEventListener("change", async () => {
+    await chrome.storage.local.set({ apiKey: inputElement.value });
+  });
+}
+
 initDashboardButton();
 
 initAutonomyLevel();
 
 initToggle();
+
+void initApiKey();
