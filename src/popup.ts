@@ -19,7 +19,8 @@ async function initAutonomyLevel() {
   const level = (stored.autonomyLevel ?? "limited") as
     | "limited"
     | "standard"
-    | "full";
+    | "full"
+    | "guardian";
   select.value = level;
 
   select.addEventListener("change", async () => {

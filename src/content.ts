@@ -1,3 +1,4 @@
+import { runGuardianScan, startGuardian, stopGuardian } from "./agent";
 import { analyzeElement } from "./analyze";
 import {
   removeHighlights,
@@ -21,6 +22,7 @@ function scanRiskIndicators(root: Node): void {
   if (root instanceof Element) {
     scanSuspiciousLinks(root);
   }
+  runGuardianScan();
 }
 
 function analyzePage(): void {
@@ -173,6 +175,7 @@ function startFullScan(): void {
   isFullScanActive = true;
   analyzePage();
   observer.observe(document.body, observerOptions);
+  runGuardianScan();
 }
 
 function stopFullScan(): void {
@@ -188,18 +191,26 @@ async function syncFullScanFromStorage(): Promise<void> {
 
   if (!enabled) {
     stopFullScan();
+    stopGuardian();
     return;
   }
 
   const level = (stored.autonomyLevel ?? "limited") as
     | "limited"
     | "standard"
-    | "full";
+    | "full"
+    | "guardian";
 
-  if (level === "full") {
+  if (level === "full" || level === "guardian") {
     startFullScan();
   } else {
     stopFullScan();
+  }
+
+  if (level === "guardian") {
+    startGuardian();
+  } else {
+    stopGuardian();
   }
 }
 

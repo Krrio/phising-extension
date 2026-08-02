@@ -3,6 +3,9 @@ import type {
   AnalyzePayload,
   AnalyzeRequestMessage,
   AnalyzeResult,
+  GuardianMessageResponse,
+  GuardianPayload,
+  GuardianRequestMessage,
   LinkMismatchSignal,
 } from "./messages";
 
@@ -84,8 +87,62 @@ async function saveToHistory(result: AnalyzeResult): Promise<void> {
   }
 }
 
+function isGuardianPayload(value: unknown): value is GuardianPayload {
+  return (
+    isRecord(value) &&
+    typeof value.content === "string" &&
+    value.content.length <= MAX_CONTENT_LENGTH &&
+    isStringArray(value.domains) &&
+    isStringArray(value.phrases)
+  );
+}
+
+function isGuardianRequestMessage(
+  value: unknown,
+): value is GuardianRequestMessage {
+  return (
+    isRecord(value) &&
+    value.type === "GUARDIAN_ANALYZE" &&
+    isGuardianPayload(value.payload)
+  );
+}
+
+async function requestGuardianAnalysis(
+  payload: GuardianPayload,
+): Promise<AnalyzeResult> {
+  const response = await fetch("http://127.0.0.1:8000/guardian/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Guardian backend returned status ${response.status}`);
+  }
+
+  return (await response.json()) as AnalyzeResult;
+}
+
 chrome.runtime.onMessage.addListener(
   (message: unknown, sender, sendResponse) => {
+    if (isGuardianRequestMessage(message)) {
+      if (sender.id !== chrome.runtime.id) {
+        sendResponse({ ok: false, error: "Unauthorized message sender." });
+        return false;
+      }
+
+      void requestGuardianAnalysis(message.payload)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error: unknown) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "Guardian failed.",
+          });
+        });
+
+      return true;
+    }
+
     if (!isAnalyzeRequestMessage(message)) return false;
 
     if (sender.id !== chrome.runtime.id) {

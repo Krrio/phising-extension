@@ -134,7 +134,7 @@ function hideIcon() {
 
 function createPanel(
   count: number,
-  level: "limited" | "standard" | "full",
+  level: "limited" | "standard" | "full" | "guardian",
 ): HTMLElement {
   const panel = document.createElement("div");
   panel.id = "pg-panel";
@@ -262,14 +262,14 @@ function createPanel(
 
       try {
         const result =
-          level === "full"
-            ? await analyzeElement(lastAnalysisRoot!)
-            : await analyzeSelection(
-                lastContainer!,
-                lastRange!,
-                lastSelectedText,
-                lastPhrases,
-              );
+          level === "full" ?
+            await analyzeElement(lastAnalysisRoot!)
+          : await analyzeSelection(
+              lastContainer!,
+              lastRange!,
+              lastSelectedText,
+              lastPhrases,
+            );
         const resultBox = panel.querySelector<HTMLElement>(".pg-result");
         if (resultBox) renderResult(resultBox, result);
       } catch (error) {
@@ -306,7 +306,8 @@ async function showPanel(anchor?: HTMLElement) {
   const level = (stored.autonomyLevel ?? "limited") as
     | "limited"
     | "standard"
-    | "full";
+    | "full"
+    | "guardian";
 
   const panel = createPanel(lastCount, level);
   const rect = ref.getBoundingClientRect();

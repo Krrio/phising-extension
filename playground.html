@@ -32,8 +32,7 @@
         overflow: hidden;
         background: var(--page);
         color: var(--text);
-        font-family:
-          Inter, Roboto, Arial, Helvetica, sans-serif;
+        font-family: Inter, Roboto, Arial, Helvetica, sans-serif;
         font-size: 14px;
       }
 
@@ -439,7 +438,10 @@
       .mail-row {
         display: grid;
         min-height: var(--row-height, 64px);
-        grid-template-columns: 36px 36px minmax(130px, 210px) minmax(180px, 1fr) auto;
+        grid-template-columns: 36px 36px minmax(130px, 210px) minmax(
+            180px,
+            1fr
+          ) auto;
         align-items: center;
         gap: 10px;
         padding: 0 16px;
@@ -929,7 +931,12 @@
     <main class="app" id="app">
       <header class="topbar">
         <div class="brand" aria-label="Gmail Playground">
-          <button class="icon-button" id="menuButton" title="Menu" aria-label="Menu">
+          <button
+            class="icon-button"
+            id="menuButton"
+            title="Menu"
+            aria-label="Menu"
+          >
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 6h16M4 12h16M4 18h16"></path>
             </svg>
@@ -943,7 +950,9 @@
 
         <label class="search" for="searchInput">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z"></path>
+            <path
+              d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z"
+            ></path>
           </svg>
           <input
             id="searchInput"
@@ -954,7 +963,12 @@
         </label>
 
         <div class="account">
-          <button class="icon-button" id="resetButton" title="Reset danych" aria-label="Reset danych">
+          <button
+            class="icon-button"
+            id="resetButton"
+            title="Reset danych"
+            aria-label="Reset danych"
+          >
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 12a9 9 0 1 0 3-6.7"></path>
               <path d="M3 4v6h6"></path>
@@ -980,33 +994,64 @@
       <section class="mail" aria-label="Lista wiadomości">
         <div class="mail-toolbar">
           <label class="check-wrap" title="Zaznacz wszystkie">
-            <input id="selectAll" type="checkbox" aria-label="Zaznacz wszystkie" />
+            <input
+              id="selectAll"
+              type="checkbox"
+              aria-label="Zaznacz wszystkie"
+            />
           </label>
           <div class="toolbar-actions">
-            <button class="icon-button" id="refreshButton" title="Odśwież" aria-label="Odśwież">
+            <button
+              class="icon-button"
+              id="refreshButton"
+              title="Odśwież"
+              aria-label="Odśwież"
+            >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 12a9 9 0 1 1-2.6-6.4"></path>
                 <path d="M21 3v6h-6"></path>
               </svg>
             </button>
-            <button class="icon-button" data-bulk="archive" title="Archiwizuj" aria-label="Archiwizuj">
+            <button
+              class="icon-button"
+              data-bulk="archive"
+              title="Archiwizuj"
+              aria-label="Archiwizuj"
+            >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"></path>
                 <path d="M1 3h22v5H1zM10 12h4"></path>
               </svg>
             </button>
-            <button class="icon-button" data-bulk="spam" title="Oznacz jako spam" aria-label="Oznacz jako spam">
+            <button
+              class="icon-button"
+              data-bulk="spam"
+              title="Oznacz jako spam"
+              aria-label="Oznacz jako spam"
+            >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M10.3 3h3.4L21 10.3v3.4L13.7 21h-3.4L3 13.7v-3.4L10.3 3Z"></path>
+                <path
+                  d="M10.3 3h3.4L21 10.3v3.4L13.7 21h-3.4L3 13.7v-3.4L10.3 3Z"
+                ></path>
                 <path d="M12 8v4M12 16h.01"></path>
               </svg>
             </button>
-            <button class="icon-button" data-bulk="delete" title="Usuń" aria-label="Usuń">
+            <button
+              class="icon-button"
+              data-bulk="delete"
+              title="Usuń"
+              aria-label="Usuń"
+            >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15"></path>
               </svg>
             </button>
-            <button class="icon-button" data-bulk="read" title="Oznacz jako przeczytane" aria-label="Oznacz jako przeczytane">
+            <button
+              class="icon-button"
+              data-bulk="read"
+              title="Oznacz jako przeczytane"
+              aria-label="Oznacz jako przeczytane"
+            >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M4 4h16v16H4z"></path>
                 <path d="m4 7 8 6 8-6"></path>
@@ -1017,17 +1062,26 @@
           <button class="receive-button" id="receivePhishingButton">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M22 12h-6l-2 3h-4l-2-3H2"></path>
-              <path d="M5.5 5h13L22 12v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7L5.5 5Z"></path>
+              <path
+                d="M5.5 5h13L22 12v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7L5.5 5Z"
+              ></path>
             </svg>
             <span>Otrzymaj maila phishingowego</span>
           </button>
           <div class="density" aria-label="Gęstość listy">
-            <button id="comfortableButton" class="is-active" type="button">Wyg.</button>
+            <button id="comfortableButton" class="is-active" type="button">
+              Wyg.
+            </button>
             <button id="compactButton" type="button">Komp.</button>
           </div>
         </div>
 
-        <div class="tabs" id="categoryTabs" role="tablist" aria-label="Kategorie"></div>
+        <div
+          class="tabs"
+          id="categoryTabs"
+          role="tablist"
+          aria-label="Kategorie"
+        ></div>
         <div class="mail-list" id="mailList" tabindex="0"></div>
       </section>
 
@@ -1046,8 +1100,13 @@
         </div>
 
         <article class="reader-body">
-          <div class="mail-body-text" id="readerBody">
-            To lokalna skrzynka testowa. Wiadomości są zapisane tylko w pamięci przeglądarki.
+          <div
+            class="mail-body-text"
+            id="readerBody"
+            data-phishing-analysis-root
+          >
+            To lokalna skrzynka testowa. Wiadomości są zapisane tylko w pamięci
+            przeglądarki.
           </div>
         </article>
 
@@ -1058,7 +1117,12 @@
             placeholder="Odpowiedz..."
             aria-label="Odpowiedz"
           ></textarea>
-          <button class="icon-button" id="clearReplyButton" title="Wyczyść odpowiedź" aria-label="Wyczyść odpowiedź">
+          <button
+            class="icon-button"
+            id="clearReplyButton"
+            title="Wyczyść odpowiedź"
+            aria-label="Wyczyść odpowiedź"
+          >
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M18 6 6 18M6 6l12 12"></path>
             </svg>
@@ -1068,18 +1132,38 @@
     </main>
 
     <section class="compose" id="compose" aria-label="Nowa wiadomość">
-      <div class="compose-dialog" role="dialog" aria-modal="true" aria-labelledby="composeTitle">
+      <div
+        class="compose-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="composeTitle"
+      >
         <div class="compose-head">
           <strong id="composeTitle">Nowa wiadomość</strong>
-          <button class="icon-button" id="closeComposeButton" title="Zamknij" aria-label="Zamknij">
+          <button
+            class="icon-button"
+            id="closeComposeButton"
+            title="Zamknij"
+            aria-label="Zamknij"
+          >
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M18 6 6 18M6 6l12 12"></path>
             </svg>
           </button>
         </div>
         <div class="compose-fields">
-          <input id="composeTo" type="email" placeholder="Do" autocomplete="off" />
-          <input id="composeSubject" type="text" placeholder="Temat" autocomplete="off" />
+          <input
+            id="composeTo"
+            type="email"
+            placeholder="Do"
+            autocomplete="off"
+          />
+          <input
+            id="composeSubject"
+            type="text"
+            placeholder="Temat"
+            autocomplete="off"
+          />
           <textarea id="composeBody" placeholder="Treść wiadomości"></textarea>
         </div>
         <div class="compose-actions">
@@ -1090,7 +1174,9 @@
             </svg>
             Wyślij testowo
           </button>
-          <button class="secondary-action" id="saveDraftButton">Zapisz roboczą</button>
+          <button class="secondary-action" id="saveDraftButton">
+            Zapisz roboczą
+          </button>
         </div>
       </div>
     </section>
@@ -1121,8 +1207,7 @@
           from: "Newsletter Design",
           email: "newsletter@example.com",
           subject: "Przegląd tygodnia i aktualizacje produktu",
-          body:
-            "Hello,\n\nThis is a normal message with product updates, release notes and a short summary from the team.\n\nNeutral test content.",
+          body: "Hello,\n\nThis is a normal message with product updates, release notes and a short summary from the team.\n\nNeutral test content.",
           time: "09:42",
           category: "primary",
           folder: "inbox",
@@ -1136,8 +1221,7 @@
           from: "Kasia z HR",
           email: "kasia.hr@example.test",
           subject: "Spotkanie onboardingowe",
-          body:
-            "Cześć,\n\nPrzesyłam agendę spotkania onboardingowego. Daj znać, czy termin pasuje.\n\nPozdrawiam,\nKasia",
+          body: "Cześć,\n\nPrzesyłam agendę spotkania onboardingowego. Daj znać, czy termin pasuje.\n\nPozdrawiam,\nKasia",
           time: "10:18",
           category: "primary",
           folder: "inbox",
@@ -1151,8 +1235,7 @@
           from: "Cloud Storage",
           email: "storage@example.test",
           subject: "Nowy raport gotowy do pobrania",
-          body:
-            "Hej,\n\nRaport za poprzedni sprint jest gotowy. Link prowadzi do lokalnego przykładu bez żadnego backendu.\n\nMiłego dnia.",
+          body: "Hej,\n\nRaport za poprzedni sprint jest gotowy. Link prowadzi do lokalnego przykładu bez żadnego backendu.\n\nMiłego dnia.",
           time: "Wczoraj",
           category: "updates",
           folder: "inbox",
@@ -1166,8 +1249,7 @@
           from: "Social Digest",
           email: "social@example.test",
           subject: "Nowe zaproszenia i wzmianki",
-          body:
-            "Masz kilka nowych powiadomień społecznościowych. To neutralna wiadomość testowa do kategorii Social.",
+          body: "Masz kilka nowych powiadomień społecznościowych. To neutralna wiadomość testowa do kategorii Social.",
           time: "Wczoraj",
           category: "social",
           folder: "inbox",
@@ -1181,8 +1263,7 @@
           from: "Ty",
           email: "me@example.test",
           subject: "Robocza wiadomość testowa",
-          body:
-            "To jest przykładowy szkic. Możesz dopisać treść w oknie tworzenia wiadomości i zapisać ją lokalnie.",
+          body: "To jest przykładowy szkic. Możesz dopisać treść w oknie tworzenia wiadomości i zapisać ją lokalnie.",
           time: "Pon.",
           category: "primary",
           folder: "drafts",
@@ -1292,7 +1373,13 @@
       }
 
       function getMessageText(message) {
-        return [message.from, message.email, message.subject, message.body, message.label]
+        return [
+          message.from,
+          message.email,
+          message.subject,
+          message.body,
+          message.label,
+        ]
           .filter(Boolean)
           .join(" ");
       }
@@ -1326,7 +1413,9 @@
           lastIndex = index + url.length;
         }
 
-        fragment.appendChild(document.createTextNode(message.body.slice(lastIndex)));
+        fragment.appendChild(
+          document.createTextNode(message.body.slice(lastIndex)),
+        );
         elements.readerBody.replaceChildren(fragment);
       }
 
@@ -1370,7 +1459,9 @@
             }
           }
 
-          return !query || getMessageText(message).toLowerCase().includes(query);
+          return (
+            !query || getMessageText(message).toLowerCase().includes(query)
+          );
         });
       }
 
@@ -1417,7 +1508,8 @@
           const count = document.createElement("span");
           count.className = "nav-count";
           count.textContent = String(
-            state.messages.filter((message) => message.label === label.id).length,
+            state.messages.filter((message) => message.label === label.id)
+              .length,
           );
 
           button.append(chip, text, count);
@@ -1455,10 +1547,11 @@
         const messages = visibleMessages();
         elements.mailList.replaceChildren();
 
-        elements.toolbarTitle.textContent = state.activeLabel
-          ? state.activeLabel
-          : mailboxes.find((mailbox) => mailbox.id === state.activeMailbox)?.label ||
-            "Odebrane";
+        elements.toolbarTitle.textContent =
+          state.activeLabel ?
+            state.activeLabel
+          : mailboxes.find((mailbox) => mailbox.id === state.activeMailbox)
+              ?.label || "Odebrane";
 
         if (!messages.length) {
           const empty = document.createElement("div");
@@ -1594,7 +1687,9 @@
       }
 
       function selectedMessages() {
-        return state.messages.filter((message) => state.checked.has(message.id));
+        return state.messages.filter((message) =>
+          state.checked.has(message.id),
+        );
       }
 
       function bulkAction(action) {
@@ -1623,7 +1718,9 @@
         });
 
         state.checked.clear();
-        if (!visibleMessages().some((message) => message.id === state.selectedId)) {
+        if (
+          !visibleMessages().some((message) => message.id === state.selectedId)
+        ) {
           state.selectedId = visibleMessages()[0]?.id || null;
         }
         renderAll();
@@ -1640,8 +1737,7 @@
           from: "Security Notification",
           email: "security-notification@example.com",
           subject: "Nowa wiadomość bezpieczeństwa",
-          body:
-            `Hello,\n\nThis is a local test email. Wylosowana fraza: ${word}.\n\nSprawdź link bezpieczeństwa:\n${link}\n\nUse it only to check how the extension reacts to loaded mail content.`,
+          body: `Hello,\n\nThis is a local test email. Wylosowana fraza: ${word}.\n\nSprawdź link bezpieczeństwa:\n${link}\n\nUse it only to check how the extension reacts to loaded mail content.`,
           time: "Teraz",
           category: "primary",
           folder: "inbox",
@@ -1664,7 +1760,8 @@
       function createComposedMessage(folder) {
         const to = elements.composeTo.value.trim() || "recipient@example.test";
         const subject = elements.composeSubject.value.trim() || "(bez tematu)";
-        const body = elements.composeBody.value.trim() || "Pusta wiadomość testowa.";
+        const body =
+          elements.composeBody.value.trim() || "Pusta wiadomość testowa.";
 
         state.sequence += 1;
         return {
@@ -1725,7 +1822,9 @@
       elements.mailList.addEventListener("click", (event) => {
         const star = event.target.closest("[data-star]");
         if (star) {
-          const message = state.messages.find((item) => item.id === star.dataset.star);
+          const message = state.messages.find(
+            (item) => item.id === star.dataset.star,
+          );
           if (message) {
             message.starred = !message.starred;
             renderAll();
@@ -1806,7 +1905,9 @@
         elements.composeTo.focus();
       });
 
-      document.getElementById("closeComposeButton").addEventListener("click", () => closeCompose(false));
+      document
+        .getElementById("closeComposeButton")
+        .addEventListener("click", () => closeCompose(false));
 
       elements.compose.addEventListener("click", (event) => {
         if (event.target === elements.compose) {
@@ -1815,38 +1916,47 @@
       });
 
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && elements.compose.classList.contains("is-open")) {
+        if (
+          event.key === "Escape" &&
+          elements.compose.classList.contains("is-open")
+        ) {
           closeCompose(false);
         }
       });
 
-      document.getElementById("sendComposeButton").addEventListener("click", () => {
-        const message = createComposedMessage("sent");
-        state.messages.unshift(message);
-        state.activeMailbox = "sent";
-        state.activeLabel = null;
-        state.selectedId = message.id;
-        state.checked.clear();
-        closeCompose(true);
-        renderAll();
-        showToast("Dodano do wysłanych lokalnie.");
-      });
+      document
+        .getElementById("sendComposeButton")
+        .addEventListener("click", () => {
+          const message = createComposedMessage("sent");
+          state.messages.unshift(message);
+          state.activeMailbox = "sent";
+          state.activeLabel = null;
+          state.selectedId = message.id;
+          state.checked.clear();
+          closeCompose(true);
+          renderAll();
+          showToast("Dodano do wysłanych lokalnie.");
+        });
 
-      document.getElementById("saveDraftButton").addEventListener("click", () => {
-        const message = createComposedMessage("drafts");
-        state.messages.unshift(message);
-        state.activeMailbox = "drafts";
-        state.activeLabel = null;
-        state.selectedId = message.id;
-        state.checked.clear();
-        closeCompose(true);
-        renderAll();
-        showToast("Zapisano roboczą lokalnie.");
-      });
+      document
+        .getElementById("saveDraftButton")
+        .addEventListener("click", () => {
+          const message = createComposedMessage("drafts");
+          state.messages.unshift(message);
+          state.activeMailbox = "drafts";
+          state.activeLabel = null;
+          state.selectedId = message.id;
+          state.checked.clear();
+          closeCompose(true);
+          renderAll();
+          showToast("Zapisano roboczą lokalnie.");
+        });
 
-      document.getElementById("clearReplyButton").addEventListener("click", () => {
-        elements.replyBox.value = "";
-      });
+      document
+        .getElementById("clearReplyButton")
+        .addEventListener("click", () => {
+          elements.replyBox.value = "";
+        });
 
       elements.comfortableButton.addEventListener("click", () => {
         state.compact = false;
