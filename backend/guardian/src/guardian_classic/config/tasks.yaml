@@ -1,0 +1,52 @@
+badanie_domen_task:
+  description: >
+    Sprawdź podane domeny pod kątem podejrzanych cech: {domains}.
+    Użyj dostępnego narzędzia do wykrywania podróbek i typosquattingu.
+    Sprawdź także wiek rejestracji domen — świeżo zarejestrowane domeny
+    są częstym narzędziem phishingu, ale stara domena nie jest automatycznie
+    bezpieczna.
+    Zwróć listę domen uznanych za podejrzane wraz z krótkim uzasadnieniem.
+  expected_output: >
+    Lista podejrzanych domen z uzasadnieniem, uwzględniająca zarówno
+    podobieństwo nazwy do znanych marek, jak i wiek rejestracji.
+  agent: analityk_domen
+
+analiza_tresci_task:
+  description: >
+    Oceń samą treść wiadomości pod kątem językowych i psychologicznych oznak
+    phishingu: {content}.
+    Weź pod uwagę wykryte podejrzane frazy: {phrases}.
+    Zwróć uwagę na: presję czasu, straszenie konsekwencjami, prośby o dane
+    logowania lub płatnicze, nakłanianie do kliknięcia, podszywanie się pod
+    instytucję.
+    Większość treści to legalna komunikacja, phishing jest wyjątkiem.
+    Sygnały z reguł to wskazówki, nie dowody.
+    NIE wydawaj końcowego werdyktu ani oceny punktowej — to zadanie
+    orkiestratora. Opisz wyłącznie, co znalazłeś w treści.
+  expected_output: >
+    Opis znalezionych w treści oznak phishingu (lub ich braku),
+    z podaniem konkretnych fragmentów, które je uzasadniają.
+  agent: analityk_tresci
+
+synteza_task:
+  description: >
+    Zbierz ustalenia analityka domen i analityka treści, zważ je i wydaj
+    końcowy werdykt.
+    Jeśli sygnały sobie przeczą, wyjaśnij, który przeważa i dlaczego.
+    Oceń trustScore według skali, gdzie 100 oznacza treść w pełni bezpieczną,
+    a 0 jednoznaczny phishing: 90-100 brak oznak ryzyka, 70-89 drobne
+    nietypowości, 40-69 mieszane sygnały, 0-39 wyraźne oznaki phishingu.
+    Werdykt musi być spójny z trustScore: safe przy 70-100, suspicious przy
+    40-69, phishing przy 0-39.
+    Dla treści bezpiecznej zwróć pustą listę categories.
+    confidence oznacza pewność Twojej oceny, nie poziom zagrożenia.
+  expected_output: >
+    Obiekt z polami: trustScore (0-100), verdict (safe, suspicious lub phishing),
+    confidence (0.0-1.0), reasoning (krótkie uzasadnienie po polsku),
+    categories (lista wykrytych kategorii zagrożeń, pusta jeśli treść bezpieczna).
+    Dozwolone kategorie: credential_request, urgency, impersonation,
+    suspicious_link, suspicious_domain, financial.
+  agent: orkiestrator
+  context:
+    - badanie_domen_task
+    - analiza_tresci_task
