@@ -31,7 +31,7 @@ function isAnalyzableBlock(block: Element): boolean {
     return false;
 
   const text = block.textContent?.trim() ?? "";
-  return text.length >= 120;
+  return text.length >= 120 && text.length <= 8000;
 }
 
 function hashContent(text: string): string {
@@ -61,7 +61,10 @@ function collectCandidates(): Element[] {
     if (block && isAnalyzableBlock(block)) candidates.add(block);
   }
 
-  return Array.from(candidates);
+  const list = Array.from(candidates);
+  return list.filter(
+    (block) => !list.some((other) => other !== block && block.contains(other)),
+  );
 }
 
 async function analyzeCandidate(block: Element): Promise<void> {
