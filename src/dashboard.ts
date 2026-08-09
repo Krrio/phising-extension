@@ -1,4 +1,5 @@
 import Chart from "chart.js/auto";
+import type { GuardianAuditEntry } from "./messages";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -179,6 +180,91 @@ function renderCategoryChart(data: CategoryDistribution): void {
   });
 }
 
+async function renderAuditLog(): Promise<void> {
+  const container = document.getElementById("auditLog");
+  if (!container) return;
+
+  const stored = (await chrome.storage.local.get("guardianAuditLog")) as {
+    guardianAuditLog?: GuardianAuditEntry[];
+  };
+  const log = stored.guardianAuditLog ?? [];
+
+  container.innerHTML = "";
+
+  if (log.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "text-zinc-500";
+    empty.textContent = "Guardian nie podjął jeszcze żadnych działań.";
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const entry of log) {
+    container.appendChild(createAuditCard(entry));
+  }
+}
+
+function createAuditCard(entry: GuardianAuditEntry): HTMLElement {
+  const isHidden = entry.action === "hidden";
+
+  const card = document.createElement("div");
+  card.className = `rounded-xl border p-4 ${
+    isHidden ? "border-red-200 bg-red-50" : "border-zinc-200 bg-white"
+  }`;
+
+  const header = document.createElement("div");
+  header.className = "flex items-center justify-between mb-2";
+
+  const action = document.createElement("span");
+  action.className = `text-sm font-semibold ${
+    isHidden ? "text-red-700" : "text-zinc-600"
+  }`;
+  action.textContent = isHidden ? "Ukryto treść" : "Użytkownik odsłonił";
+  header.appendChild(action);
+
+  const time = document.createElement("span");
+  time.className = "text-xs text-zinc-500";
+  time.textContent = new Intl.DateTimeFormat("pl-PL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(entry.timestamp));
+  header.appendChild(time);
+
+  card.appendChild(header);
+
+  const excerpt = document.createElement("div");
+  excerpt.className = "text-sm text-zinc-800 mb-2 italic";
+  excerpt.textContent = `„${entry.excerpt}”`;
+  card.appendChild(excerpt);
+
+  const reasoning = document.createElement("div");
+  reasoning.className = "text-sm text-zinc-600 mb-2";
+  reasoning.textContent = entry.reasoning;
+  card.appendChild(reasoning);
+
+  const meta = document.createElement("div");
+  meta.className = "flex items-center gap-3 text-xs text-zinc-500";
+  meta.textContent = `Trust score: ${entry.trustScore}/100 · pewność ${Math.round(
+    entry.confidence * 100,
+  )}% · ${new URL(entry.url).hostname}`;
+  card.appendChild(meta);
+
+  if (entry.categories.length > 0) {
+    const cats = document.createElement("div");
+    cats.className = "flex flex-wrap gap-2 mt-2";
+    for (const category of entry.categories) {
+      const tag = document.createElement("span");
+      tag.className =
+        "rounded-full bg-zinc-200 px-2 py-0.5 text-xs text-zinc-700";
+      tag.textContent = category;
+      cats.appendChild(tag);
+    }
+    card.appendChild(cats);
+  }
+
+  return card;
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`);
 
@@ -219,3 +305,4 @@ async function initDashboard(): Promise<void> {
 }
 
 void initDashboard();
+void renderAuditLog();

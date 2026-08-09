@@ -1,4 +1,8 @@
 import { findAnalysisRoot } from "./analysisScope";
+import {
+  appendGuardianAuditEntry,
+  createGuardianAuditEntry,
+} from "./guardianAudit";
 import { extractHostname } from "./links";
 import type { AnalyzeResult, GuardianMessageResponse } from "./messages";
 import { suspiciousWords } from "./phrases";
@@ -12,6 +16,7 @@ const SHIELD_CLASS = "pg-guardian-shield";
 
 const verdictCache = new Map<string, AnalyzeResult>();
 const hiddenBlocks = new Map<Element, { hash: string; restore: () => void }>();
+let revealedBlocks = new WeakMap<Element, string>();
 let crewCallCount = 0;
 let scanTimer: ReturnType<typeof setTimeout> | undefined;
 let isGuardianActive = false;
@@ -80,8 +85,10 @@ function shouldHide(verdict: AnalyzeResult): boolean {
 
 function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
   if (!(block instanceof HTMLElement)) return;
+  if (!block.isConnected || !block.parentElement) return;
   if (block.hasAttribute(HIDDEN_ATTR)) return;
 
+  const content = block.textContent?.trim() ?? "";
   block.setAttribute(HIDDEN_ATTR, "true");
   const originalDisplay = block.style.display;
 
@@ -138,13 +145,32 @@ function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
   revealButton.style.fontWeight = "600";
   revealButton.style.cursor = "pointer";
   revealButton.style.fontFamily = "Poppins, sans-serif";
-  revealButton.addEventListener("click", restore);
+  revealButton.addEventListener("click", () => {
+    revealedBlocks.set(block, hash);
+    restore();
+    void appendGuardianAuditEntry(
+      createGuardianAuditEntry(
+        "revealed",
+        verdict,
+        content,
+        window.location.href,
+      ),
+    );
+  });
   shield.appendChild(revealButton);
 
   block.style.display = "none";
   block.parentElement?.insertBefore(shield, block);
 
   hiddenBlocks.set(block, { hash, restore });
+  void appendGuardianAuditEntry(
+    createGuardianAuditEntry(
+      "hidden",
+      verdict,
+      content,
+      window.location.href,
+    ),
+  );
 }
 
 function releaseStaleBlocks(): void {
@@ -171,6 +197,8 @@ async function analyzeCandidate(block: Element): Promise<void> {
   if (content.length < 40) return;
 
   const hash = hashContent(content);
+
+  if (revealedBlocks.get(block) === hash) return;
 
   const cached = verdictCache.get(hash);
   if (cached) {
@@ -206,6 +234,12 @@ async function analyzeCandidate(block: Element): Promise<void> {
     );
 
     verdictCache.set(hash, verdict);
+
+    if (!block.isConnected) return;
+    if (hashContent(block.textContent?.trim() ?? "") !== hash) {
+      runGuardianScan();
+      return;
+    }
 
     if (shouldHide(verdict)) {
       hideBlock(block, verdict, hash);
@@ -255,7 +289,10 @@ export function runGuardianScan(): void {
 export function startGuardian(): void {
   isGuardianActive = true;
 
-  if (document.getElementById(STATUS_ID)) return;
+  if (document.getElementById(STATUS_ID)) {
+    runGuardianScan();
+    return;
+  }
 
   const panel = document.createElement("div");
   panel.id = STATUS_ID;
@@ -290,10 +327,29 @@ export function startGuardian(): void {
   label.textContent = "Guardian aktywny";
   panel.appendChild(label);
 
+  const killButton = document.createElement("button");
+  killButton.type = "button";
+  killButton.textContent = "Wyłącz";
+  killButton.style.border = "none";
+  killButton.style.borderRadius = "999px";
+  killButton.style.padding = "5px 12px";
+  killButton.style.marginLeft = "4px";
+  killButton.style.background = "#3f3f46";
+  killButton.style.color = "white";
+  killButton.style.fontSize = "12px";
+  killButton.style.fontWeight = "600";
+  killButton.style.cursor = "pointer";
+  killButton.style.fontFamily = "Poppins, sans-serif";
+  killButton.addEventListener("click", () => {
+    void killGuardian();
+  });
+  panel.appendChild(killButton);
+
   document.body.appendChild(panel);
   requestAnimationFrame(() => {
     panel.style.opacity = "1";
   });
+  runGuardianScan();
 }
 
 export function stopGuardian(): void {
@@ -305,11 +361,17 @@ export function stopGuardian(): void {
     entry.restore();
   }
   hiddenBlocks.clear();
+  revealedBlocks = new WeakMap<Element, string>();
 
   const existing = document.getElementById(STATUS_ID);
   if (!existing) return;
   existing.style.opacity = "0";
   setTimeout(() => existing.remove(), 300);
+}
+
+export async function killGuardian(): Promise<void> {
+  stopGuardian();
+  await chrome.storage.local.set({ autonomyLevel: "full" });
 }
 
 async function requestGuardianVerdict(

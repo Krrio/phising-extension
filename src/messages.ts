@@ -42,6 +42,17 @@ export interface GuardianPayload {
   phrases: string[];
 }
 
+export interface GuardianAuditEntry {
+  timestamp: string;
+  url: string;
+  action: "hidden" | "revealed";
+  trustScore: number;
+  confidence: number;
+  reasoning: string;
+  categories: string[];
+  excerpt: string;
+}
+
 export interface GuardianRequestMessage {
   type: "GUARDIAN_ANALYZE";
   payload: GuardianPayload;

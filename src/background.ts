@@ -77,11 +77,15 @@ async function requestAnalysis(
 
 async function saveToHistory(result: AnalyzeResult): Promise<void> {
   try {
-    await fetch("http://127.0.0.1:8000/history/save", {
+    const response = await fetch("http://127.0.0.1:8000/history/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(result),
     });
+
+    if (!response.ok) {
+      throw new Error(`History backend returned status ${response.status}`);
+    }
   } catch (error) {
     console.error("Nie udało się zapisać historii:", error);
   }
@@ -120,7 +124,10 @@ async function requestGuardianAnalysis(
     throw new Error(`Guardian backend returned status ${response.status}`);
   }
 
-  return (await response.json()) as AnalyzeResult;
+  const result = (await response.json()) as AnalyzeResult;
+  await saveToHistory(result);
+
+  return result;
 }
 
 chrome.runtime.onMessage.addListener(
