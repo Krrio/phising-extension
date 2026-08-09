@@ -7,6 +7,11 @@ import {
 } from "./highlight";
 import { extractHostname } from "./links";
 import { normalize } from "./normalize";
+import {
+  getTextContentExcludingOwnUi,
+  isInsideOwnUi,
+  registerOwnUiRoot,
+} from "./ownUi";
 import { findNearestPhrase, suspiciousWords } from "./phrases";
 import { initSelectionListener } from "./selection";
 import { isSuspiciousDomain } from "./suspiciousDomain";
@@ -15,6 +20,7 @@ import { createWidget, injectPoppinsFont } from "./widget";
 console.log("Phishing Extension content script loaded:", window.location.href);
 
 let isFullScanActive = false;
+let suspiciousLinkModal: HTMLElement | null = null;
 
 function scanRiskIndicators(root: Node): void {
   scanElement(root);
@@ -28,7 +34,7 @@ function scanRiskIndicators(root: Node): void {
 function analyzePage(): void {
   injectPoppinsFont();
 
-  const pageText = document.body.innerText.toLowerCase();
+  const pageText = getTextContentExcludingOwnUi(document.body).toLowerCase();
 
   const matches = suspiciousWords.filter((word) =>
     pageText.includes(word.toLowerCase()),
@@ -47,7 +53,8 @@ function analyzePage(): void {
 }
 
 function closeSuspiciousLinkModal(): void {
-  document.getElementById("pg-suspicious-link-modal")?.remove();
+  suspiciousLinkModal?.remove();
+  suspiciousLinkModal = null;
 }
 
 function createModalButton(label: string): HTMLButtonElement {
@@ -69,6 +76,7 @@ function showSuspiciousLinkModal(href: string, hostname: string): void {
   injectPoppinsFont();
 
   const overlay = document.createElement("div");
+  registerOwnUiRoot(overlay);
   overlay.id = "pg-suspicious-link-modal";
   overlay.style.position = "fixed";
   overlay.style.inset = "0";
@@ -146,6 +154,7 @@ function showSuspiciousLinkModal(href: string, hostname: string): void {
     }
   });
 
+  suspiciousLinkModal = overlay;
   document.body.appendChild(overlay);
   cancelButton.focus();
 }
@@ -158,7 +167,7 @@ function handleSuspiciousLinkClick(event: MouseEvent): void {
 
   const target = event.target;
   if (!(target instanceof Element)) return;
-  if (target.closest("#pg-suspicious-link-modal")) return;
+  if (isInsideOwnUi(target)) return;
 
   const link = target.closest<HTMLAnchorElement>("a[href]");
   if (!link) return;

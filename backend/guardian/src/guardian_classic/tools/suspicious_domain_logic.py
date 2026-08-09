@@ -1,6 +1,10 @@
 import re
 import unicodedata
+from dataclasses import dataclass
+from typing import Literal, TypeAlias
 from urllib.parse import urlparse
+
+import tldextract
 from Levenshtein import distance as levenshtein
 
 # --- DANE (przepisz z TS) ---
@@ -534,7 +538,113 @@ SUSPICIOUS_ADDITIONS = [
   "recovery",
 ]
 
-# --- FUNKCJE POMOCNICZE ---
+# The bundled PSL snapshot makes parsing deterministic and keeps runtime fully
+# offline. ``cache_dir=None`` also avoids cache writes outside the application.
+_TLD_EXTRACT = tldextract.TLDExtract(
+    suffix_list_urls=(),
+    include_psl_private_domains=True,
+    cache_dir=None,
+)
+
+DomainMatchProvenance: TypeAlias = Literal[
+    "raw",
+    "split",
+    "addition-stripped",
+    "leet",
+    "fuzzy",
+]
+SuspiciousDomainReason: TypeAlias = Literal[
+    "unverified-regional-brand",
+    "non-regional-brand-domain",
+    "suspicious-addition",
+    "brand-in-foreign-subdomain",
+    "character-substitution",
+    "numeric-affix",
+    "brand-label-obfuscation",
+    "lookalike-spelling",
+    "risky-public-suffix",
+    "private-or-shared-hosting",
+]
+CandidateLocation: TypeAlias = Literal["registrable", "subdomain"]
+
+
+@dataclass(frozen=True, slots=True)
+class DomainAnalysis:
+    hostname: str
+    is_suspicious: bool
+    score: int
+    reasons: tuple[SuspiciousDomainReason, ...]
+    matched_brand: str | None
+    provenance: DomainMatchProvenance | None
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedHostname:
+    domain: str
+    domain_without_suffix: str
+    public_suffix: str
+    subdomain: str
+    is_icann: bool
+    is_private: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DomainCandidate:
+    value: str
+    provenance: Literal["raw", "split", "addition-stripped", "leet"]
+    location: CandidateLocation
+    normalized_label: str
+    source_label: str
+
+
+@dataclass(slots=True)
+class MatchEvidence:
+    score: int
+    reasons: list[SuspiciousDomainReason]
+    matched_brand: str
+    provenance: DomainMatchProvenance
+
+
+RISKY_PUBLIC_SUFFIXES = {
+    "buzz",
+    "cf",
+    "click",
+    "ga",
+    "gq",
+    "icu",
+    "ml",
+    "mov",
+    "tk",
+    "top",
+    "work",
+    "xyz",
+    "zip",
+}
+
+# Most entries are private PSL suffixes. Explicit entries keep the policy clear
+# and cover shared providers such as amazonaws.com whose tenant boundary is not
+# represented by a single private PSL rule.
+SHARED_HOSTING_SUFFIXES = {
+    "amazonaws.com",
+    "appspot.com",
+    "cloudfront.net",
+    "github.io",
+    "netlify.app",
+    "pages.dev",
+    "vercel.app",
+    "web.app",
+}
+
+SUSPICIOUS_SCORE_THRESHOLD = 3
+PROVENANCE_PRIORITY: dict[DomainMatchProvenance, int] = {
+    "raw": 0,
+    "split": 1,
+    "addition-stripped": 2,
+    "fuzzy": 3,
+    "leet": 4,
+}
+
+
 def normalize_token(value: str) -> str:
     value = unicodedata.normalize("NFKD", value)
     value = re.sub(r"[\u0300-\u036f]", "", value)
@@ -543,30 +653,134 @@ def normalize_token(value: str) -> str:
 
 def normalize_hostname(value: str) -> str:
     trimmed = value.strip()
+    if not trimmed:
+        return ""
+
     has_protocol = re.match(r"^[a-z][a-z\d+\-.]*://", trimmed, re.IGNORECASE)
     try:
         parsed = urlparse(trimmed if has_protocol else f"https://{trimmed}")
         hostname = parsed.hostname or ""
-        return hostname.lower().removeprefix("www.").rstrip(".")
-    except Exception:
-        cleaned = re.sub(r"^https?://", "", trimmed.lower())
-        cleaned = cleaned.removeprefix("www.")
-        cleaned = re.split(r"[/?#]", cleaned)[0].split(":")[0]
-        return cleaned.rstrip(".")
+        return hostname.encode("idna").decode("ascii").lower().rstrip(".")
+    except (UnicodeError, ValueError):
+        return ""
 
 
-def is_official_domain(hostname: str) -> bool:
+def parse_hostname(hostname: str) -> ParsedHostname | None:
+    extracted = _TLD_EXTRACT(hostname)
+
+    if not extracted.domain or not extracted.suffix:
+        return None
+
+    return ParsedHostname(
+        domain=extracted.top_domain_under_public_suffix,
+        domain_without_suffix=extracted.domain,
+        public_suffix=extracted.suffix,
+        subdomain=extracted.subdomain,
+        # With no extra suffixes configured, every recognized non-private rule
+        # comes from the ICANN section of the bundled PSL snapshot.
+        is_icann=not extracted.is_private,
+        is_private=extracted.is_private,
+    )
+
+
+# A label receives the regional-domain policy only if the allowlist proves that
+# it is already used as an official registrable domain. This avoids maintaining
+# country-by-country variants while keeping aliases without an official root,
+# such as appleid, outside the policy.
+_NORMALIZED_BRAND_SET = {normalize_token(brand) for brand in KNOWN_BRANDS}
+REGIONAL_BRAND_LABELS: set[str] = set()
+OFFICIAL_BRAND_LABEL_FORMS: dict[str, set[str]] = {}
+
+for official_domain in OFFICIAL_DOMAINS:
+    parsed_official_domain = parse_hostname(official_domain)
+    if parsed_official_domain is None:
+        continue
+
+    source_label = parsed_official_domain.domain_without_suffix.lower()
+    normalized_label = normalize_token(source_label)
+    if normalized_label not in _NORMALIZED_BRAND_SET:
+        continue
+
+    REGIONAL_BRAND_LABELS.add(normalized_label)
+    OFFICIAL_BRAND_LABEL_FORMS.setdefault(normalized_label, set()).add(source_label)
+
+
+def is_shared_hosting_hostname(hostname: str) -> bool:
     return any(
-        hostname == official or hostname.endswith(f".{official}")
-        for official in OFFICIAL_DOMAINS
+        hostname != suffix and hostname.endswith(f".{suffix}")
+        for suffix in SHARED_HOSTING_SUFFIXES
+    )
+
+
+def is_official_domain(
+    hostname: str,
+    parsed_hostname: ParsedHostname | None = None,
+) -> bool:
+    parsed_hostname = parsed_hostname or parse_hostname(hostname)
+
+    for official_domain in OFFICIAL_DOMAINS:
+        if hostname == official_domain:
+            return True
+
+        if not hostname.endswith(f".{official_domain}"):
+            continue
+
+        if official_domain in SHARED_HOSTING_SUFFIXES:
+            continue
+
+        # A subdomain is trusted only while it remains within the same
+        # registrable-domain boundary. Private/shared tenants must not inherit
+        # the hosting provider's allowlist entry.
+        if parsed_hostname and parsed_hostname.domain == official_domain:
+            return True
+
+    return False
+
+
+def get_plain_regional_brand(
+    hostname: str,
+    parsed_hostname: ParsedHostname,
+) -> str | None:
+    registrable_label = normalize_token(parsed_hostname.domain_without_suffix)
+    source_label = parsed_hostname.domain_without_suffix.lower()
+
+    if registrable_label not in REGIONAL_BRAND_LABELS or not is_known_brand_label_form(
+        source_label,
+        registrable_label,
+    ):
+        return None
+
+    if (
+        not parsed_hostname.is_icann
+        or parsed_hostname.is_private
+        or is_shared_hosting_hostname(hostname)
+        or parsed_hostname.public_suffix in RISKY_PUBLIC_SUFFIXES
+    ):
+        return None
+
+    return registrable_label
+
+
+def is_known_brand_label_form(source_label: str, brand: str) -> bool:
+    return source_label == brand or source_label in OFFICIAL_BRAND_LABEL_FORMS.get(
+        brand,
+        set(),
     )
 
 
 def create_character_variants(value: str) -> list[str]:
     return [
         value,
-        value.replace("0", "o").replace("1", "l").replace("3", "e").replace("5", "s").replace("7", "t"),
-        value.replace("0", "o").replace("1", "i").replace("3", "e").replace("5", "s").replace("7", "t"),
+        value.replace("0", "o")
+        .replace("1", "l")
+        .replace("3", "e")
+        .replace("5", "s")
+        .replace("7", "t"),
+        value.replace("0", "o")
+        .replace("1", "i")
+        .replace("3", "e")
+        .replace("5", "s")
+        .replace("7", "t"),
     ]
 
 
@@ -577,32 +791,124 @@ def remove_suspicious_additions(value: str) -> str:
     return re.sub(r"^\d+|\d+$", "", result)
 
 
-def get_domain_candidates(hostname: str) -> list[str]:
-    candidates: set[str] = set()
-    labels = [label for label in hostname.split(".") if label]
-    labels_without_tld = labels[:-1]
+def add_candidate(
+    candidates: list[DomainCandidate],
+    seen_candidates: set[tuple[str, str, str, str]],
+    value: str,
+    provenance: Literal["raw", "split", "addition-stripped", "leet"],
+    location: CandidateLocation,
+    normalized_label: str,
+    source_label: str,
+) -> None:
+    if len(value) < 3:
+        return
 
-    for label in labels_without_tld:
-        normalized_label = normalize_token(label)
-        if len(normalized_label) >= 3:
-            candidates.add(normalized_label)
+    key = (location, normalized_label, provenance, value)
+    if key in seen_candidates:
+        return
 
-        for part in re.split(r"[-_]", label):
-            normalized_part = normalize_token(part)
-            if len(normalized_part) >= 3:
-                candidates.add(normalized_part)
+    seen_candidates.add(key)
+    candidates.append(
+        DomainCandidate(
+            value=value,
+            provenance=provenance,
+            location=location,
+            normalized_label=normalized_label,
+            source_label=source_label,
+        )
+    )
 
-        without_additions = remove_suspicious_additions(normalized_label)
-        if len(without_additions) >= 3:
-            candidates.add(without_additions)
 
-    with_variants: set[str] = set()
-    for candidate in candidates:
-        for variant in create_character_variants(candidate):
-            if len(variant) >= 3:
-                with_variants.add(variant)
+def get_label_candidates(
+    label: str,
+    location: CandidateLocation,
+) -> list[DomainCandidate]:
+    candidates: list[DomainCandidate] = []
+    seen_candidates: set[tuple[str, str, str, str]] = set()
+    normalized_label = normalize_token(label)
+    source_label = label.lower()
 
-    return list(with_variants)
+    add_candidate(
+        candidates,
+        seen_candidates,
+        normalized_label,
+        "raw",
+        location,
+        normalized_label,
+        source_label,
+    )
+
+    for part in re.split(r"[-_]", label):
+        add_candidate(
+            candidates,
+            seen_candidates,
+            normalize_token(part),
+            "split",
+            location,
+            normalized_label,
+            source_label,
+        )
+
+    without_additions = remove_suspicious_additions(normalized_label)
+    if without_additions != normalized_label:
+        add_candidate(
+            candidates,
+            seen_candidates,
+            without_additions,
+            "addition-stripped",
+            location,
+            normalized_label,
+            source_label,
+        )
+
+    for brand in NORMALIZED_BRANDS:
+        brand_index = normalized_label.find(brand)
+        if brand_index == -1:
+            continue
+
+        before_brand = normalized_label[:brand_index]
+        after_brand = normalized_label[brand_index + len(brand) :]
+        has_extra_digits = bool(before_brand or after_brand)
+        before_is_digits = not before_brand or before_brand.isdigit()
+        after_is_digits = not after_brand or after_brand.isdigit()
+
+        if has_extra_digits and before_is_digits and after_is_digits:
+            add_candidate(
+                candidates,
+                seen_candidates,
+                brand,
+                "addition-stripped",
+                location,
+                normalized_label,
+                source_label,
+            )
+
+    for candidate in list(candidates):
+        for variant in create_character_variants(candidate.value):
+            if variant != candidate.value:
+                add_candidate(
+                    candidates,
+                    seen_candidates,
+                    variant,
+                    "leet",
+                    location,
+                    normalized_label,
+                    source_label,
+                )
+
+    return candidates
+
+
+def get_domain_candidates(parsed_hostname: ParsedHostname) -> list[DomainCandidate]:
+    candidates = get_label_candidates(
+        parsed_hostname.domain_without_suffix,
+        "registrable",
+    )
+
+    for label in filter(None, parsed_hostname.subdomain.split(".")):
+        candidates.extend(get_label_candidates(label, "subdomain"))
+
+    return candidates
 
 
 def get_allowed_distance(brand: str) -> int:
@@ -612,41 +918,219 @@ def get_allowed_distance(brand: str) -> int:
         return 1
     return 2
 
-# --- STAŁA POCHODNA ---
-NORMALIZED_BRANDS = list({normalize_token(b) for b in KNOWN_BRANDS})
 
-# --- GŁÓWNA FUNKCJA ---
-def _matches_brand(candidate: str, brand: str) -> bool:
-    allowed = get_allowed_distance(brand)
+# dict preserves the source order while removing the duplicate primevideo entry.
+NORMALIZED_BRANDS = list(
+    dict.fromkeys(normalize_token(brand) for brand in KNOWN_BRANDS)
+)
 
-    # dokładna nazwa marki na nieoficjalnej domenie
-    if candidate == brand:
-        return True
 
-    if allowed == 0:
-        return False
+def get_additions_beside_brand(normalized_label: str, brand: str) -> list[str]:
+    brand_index = normalized_label.find(brand)
+    if brand_index == -1:
+        return []
 
-    # optymalizacja: różnica długości większa niż próg
-    if abs(len(candidate) - len(brand)) > allowed:
-        return False
+    # Remove the brand first, otherwise a legitimate brand such as
+    # bankmillennium would match the addition "bank" inside its own name.
+    text_beside_brand = (
+        normalized_label[:brand_index]
+        + normalized_label[brand_index + len(brand) :]
+    )
+    return [
+        addition
+        for addition in SUSPICIOUS_ADDITIONS
+        if normalize_token(addition) in text_beside_brand
+    ]
 
-    dist = levenshtein(candidate, brand)
-    return 0 < dist <= allowed
+
+def get_text_beside_brand(normalized_label: str, brand: str) -> str:
+    brand_index = normalized_label.find(brand)
+    if brand_index == -1:
+        return ""
+
+    return (
+        normalized_label[:brand_index]
+        + normalized_label[brand_index + len(brand) :]
+    )
+
+
+def add_reason(
+    evidence: MatchEvidence,
+    reason: SuspiciousDomainReason,
+    score: int,
+) -> None:
+    if reason in evidence.reasons:
+        return
+
+    evidence.reasons.append(reason)
+    evidence.score += score
+
+
+def create_evidence(
+    candidate: DomainCandidate,
+    brand: str,
+    parsed_hostname: ParsedHostname,
+    hostname: str,
+    fuzzy_match: bool,
+) -> MatchEvidence:
+    provenance: DomainMatchProvenance = (
+        "fuzzy" if fuzzy_match else candidate.provenance
+    )
+    evidence = MatchEvidence(
+        score=0,
+        reasons=[],
+        matched_brand=brand,
+        provenance=provenance,
+    )
+    registrable_brand = normalize_token(parsed_hostname.domain_without_suffix)
+    brand_is_in_foreign_subdomain = (
+        candidate.location == "subdomain" and registrable_brand != brand
+    )
+
+    if fuzzy_match:
+        add_reason(evidence, "lookalike-spelling", 3)
+    elif candidate.provenance == "leet":
+        add_reason(evidence, "character-substitution", 3)
+    elif brand_is_in_foreign_subdomain:
+        add_reason(evidence, "brand-in-foreign-subdomain", 3)
+    elif brand in REGIONAL_BRAND_LABELS:
+        add_reason(evidence, "unverified-regional-brand", 1)
+    else:
+        add_reason(evidence, "non-regional-brand-domain", 3)
+
+    if (
+        candidate.location == "registrable"
+        and get_additions_beside_brand(candidate.normalized_label, brand)
+    ):
+        add_reason(evidence, "suspicious-addition", 2)
+
+    if candidate.location == "registrable" and any(
+        character.isdigit()
+        for character in get_text_beside_brand(candidate.normalized_label, brand)
+    ):
+        add_reason(evidence, "numeric-affix", 2)
+
+    if (
+        candidate.location == "registrable"
+        and normalize_token(candidate.source_label) == brand
+        and not is_known_brand_label_form(candidate.source_label, brand)
+    ):
+        add_reason(evidence, "brand-label-obfuscation", 2)
+
+    if parsed_hostname.public_suffix in RISKY_PUBLIC_SUFFIXES:
+        add_reason(evidence, "risky-public-suffix", 2)
+
+    if parsed_hostname.is_private or is_shared_hosting_hostname(hostname):
+        add_reason(evidence, "private-or-shared-hosting", 2)
+
+    return evidence
+
+
+def is_better_evidence(
+    candidate: MatchEvidence,
+    current: MatchEvidence | None,
+) -> bool:
+    if current is None or candidate.score != current.score:
+        return current is None or candidate.score > current.score
+
+    candidate_priority = PROVENANCE_PRIORITY[candidate.provenance]
+    current_priority = PROVENANCE_PRIORITY[current.provenance]
+    if candidate_priority != current_priority:
+        return candidate_priority > current_priority
+
+    return len(candidate.matched_brand) > len(current.matched_brand)
+
+
+def empty_analysis(hostname: str) -> DomainAnalysis:
+    return DomainAnalysis(
+        hostname=hostname,
+        is_suspicious=False,
+        score=0,
+        reasons=(),
+        matched_brand=None,
+        provenance=None,
+    )
+
+
+def analyze_domain(domain: str) -> DomainAnalysis:
+    """Return the decision together with its score, reasons and match source."""
+
+    hostname = normalize_hostname(domain)
+    if not hostname:
+        return empty_analysis(hostname)
+
+    parsed_hostname = parse_hostname(hostname)
+    if parsed_hostname is None:
+        return empty_analysis(hostname)
+
+    if is_official_domain(hostname, parsed_hostname):
+        return empty_analysis(hostname)
+
+    # A plain company label on an ordinary ICANN suffix is the deliberate
+    # regional-domain policy. Once accepted, its subdomains inherit the result.
+    # Risky and shared/private suffixes are excluded from this shortcut.
+    plain_regional_brand = get_plain_regional_brand(hostname, parsed_hostname)
+    if plain_regional_brand:
+        return DomainAnalysis(
+            hostname=hostname,
+            is_suspicious=False,
+            score=1,
+            reasons=("unverified-regional-brand",),
+            matched_brand=plain_regional_brand,
+            provenance="raw",
+        )
+
+    best_evidence: MatchEvidence | None = None
+
+    for candidate in get_domain_candidates(parsed_hostname):
+        for brand in NORMALIZED_BRANDS:
+            if candidate.value == brand:
+                evidence = create_evidence(
+                    candidate,
+                    brand,
+                    parsed_hostname,
+                    hostname,
+                    fuzzy_match=False,
+                )
+                if is_better_evidence(evidence, best_evidence):
+                    best_evidence = evidence
+                continue
+
+            allowed_distance = get_allowed_distance(brand)
+            if (
+                allowed_distance == 0
+                or abs(len(candidate.value) - len(brand)) > allowed_distance
+            ):
+                continue
+
+            edit_distance = levenshtein(candidate.value, brand)
+            if edit_distance == 0 or edit_distance > allowed_distance:
+                continue
+
+            evidence = create_evidence(
+                candidate,
+                brand,
+                parsed_hostname,
+                hostname,
+                fuzzy_match=True,
+            )
+            if is_better_evidence(evidence, best_evidence):
+                best_evidence = evidence
+
+    if best_evidence is None:
+        return empty_analysis(hostname)
+
+    return DomainAnalysis(
+        hostname=hostname,
+        is_suspicious=best_evidence.score >= SUSPICIOUS_SCORE_THRESHOLD,
+        score=best_evidence.score,
+        reasons=tuple(best_evidence.reasons),
+        matched_brand=best_evidence.matched_brand,
+        provenance=best_evidence.provenance,
+    )
 
 
 def is_suspicious_domain(domain: str) -> bool:
-    hostname = normalize_hostname(domain)
+    """Compatibility wrapper used by SuspiciousDomainTool."""
 
-    if not hostname or "." not in hostname:
-        return False
-
-    if is_official_domain(hostname):
-        return False
-
-    candidates = get_domain_candidates(hostname)
-
-    return any(
-        _matches_brand(candidate, brand)
-        for candidate in candidates
-        for brand in NORMALIZED_BRANDS
-    )
+    return analyze_domain(domain).is_suspicious

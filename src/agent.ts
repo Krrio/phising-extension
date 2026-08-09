@@ -5,6 +5,11 @@ import {
 } from "./guardianAudit";
 import { extractHostname } from "./links";
 import type { AnalyzeResult, GuardianMessageResponse } from "./messages";
+import {
+  getTextContentExcludingOwnUi,
+  isInsideOwnUi,
+  registerOwnUiRoot,
+} from "./ownUi";
 import { suspiciousWords } from "./phrases";
 import { isSuspiciousDomain } from "./suspiciousDomain";
 
@@ -20,6 +25,7 @@ let revealedBlocks = new WeakMap<Element, string>();
 let crewCallCount = 0;
 let scanTimer: ReturnType<typeof setTimeout> | undefined;
 let isGuardianActive = false;
+let statusPanel: HTMLElement | null = null;
 
 const UI_NOISE_SELECTOR = [
   "[role='status']",
@@ -31,14 +37,11 @@ const UI_NOISE_SELECTOR = [
   "button",
 ].join(",");
 
-const OWN_UI_SELECTOR =
-  "#pg-panel, #pg-guardian-status, #pg-suspicious-link-modal, .pg-guardian-shield";
-
 function isAnalyzableBlock(block: Element): boolean {
   if (block.closest(UI_NOISE_SELECTOR)) return false;
-  if (block.closest(OWN_UI_SELECTOR)) return false;
+  if (isInsideOwnUi(block)) return false;
 
-  const text = block.textContent?.trim() ?? "";
+  const text = getTextContentExcludingOwnUi(block).trim();
   return text.length >= 120 && text.length <= 8000;
 }
 
@@ -56,13 +59,14 @@ function collectCandidates(): Element[] {
 
   const marks = document.querySelectorAll("mark[data-phishing-mark]");
   for (const mark of Array.from(marks)) {
-    if (mark.closest(OWN_UI_SELECTOR)) continue;
+    if (isInsideOwnUi(mark)) continue;
     const block = findAnalysisRoot(mark);
     if (block && isAnalyzableBlock(block)) candidates.add(block);
   }
 
   const links = document.querySelectorAll<HTMLAnchorElement>("a[href]");
   for (const link of Array.from(links)) {
+    if (isInsideOwnUi(link)) continue;
     const hostname = extractHostname(link.href);
     if (!hostname || !isSuspiciousDomain(hostname)) continue;
     const block = findAnalysisRoot(link);
@@ -85,14 +89,16 @@ function shouldHide(verdict: AnalyzeResult): boolean {
 
 function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
   if (!(block instanceof HTMLElement)) return;
+  if (isInsideOwnUi(block)) return;
   if (!block.isConnected || !block.parentElement) return;
   if (block.hasAttribute(HIDDEN_ATTR)) return;
 
-  const content = block.textContent?.trim() ?? "";
+  const content = getTextContentExcludingOwnUi(block).trim();
   block.setAttribute(HIDDEN_ATTR, "true");
   const originalDisplay = block.style.display;
 
   const shield = document.createElement("div");
+  registerOwnUiRoot(shield);
   shield.className = SHIELD_CLASS;
   shield.style.border = "2px solid #dc2626";
   shield.style.borderRadius = "12px";
@@ -180,7 +186,9 @@ function releaseStaleBlocks(): void {
       continue;
     }
 
-    const currentHash = hashContent(block.textContent?.trim() ?? "");
+    const currentHash = hashContent(
+      getTextContentExcludingOwnUi(block).trim(),
+    );
     if (currentHash === entry.hash) continue;
 
     entry.restore();
@@ -193,7 +201,9 @@ function releaseStaleBlocks(): void {
 }
 
 async function analyzeCandidate(block: Element): Promise<void> {
-  const content = block.textContent?.trim() ?? "";
+  if (isInsideOwnUi(block)) return;
+
+  const content = getTextContentExcludingOwnUi(block).trim();
   if (content.length < 40) return;
 
   const hash = hashContent(content);
@@ -220,6 +230,7 @@ async function analyzeCandidate(block: Element): Promise<void> {
   for (const link of Array.from(
     block.querySelectorAll<HTMLAnchorElement>("a[href]"),
   )) {
+    if (isInsideOwnUi(link)) continue;
     const hostname = extractHostname(link.href);
     if (hostname && isSuspiciousDomain(hostname)) domains.add(hostname);
   }
@@ -236,7 +247,7 @@ async function analyzeCandidate(block: Element): Promise<void> {
     verdictCache.set(hash, verdict);
 
     if (!block.isConnected) return;
-    if (hashContent(block.textContent?.trim() ?? "") !== hash) {
+    if (hashContent(getTextContentExcludingOwnUi(block).trim()) !== hash) {
       runGuardianScan();
       return;
     }
@@ -257,7 +268,7 @@ function setGuardianStatus(
   state: "active" | "scanning" | "error" | "threat",
   text: string,
 ): void {
-  const panel = document.getElementById(STATUS_ID);
+  const panel = statusPanel;
   if (!panel) return;
 
   const dot = panel.querySelector<HTMLElement>(".pg-guardian-dot");
@@ -289,12 +300,13 @@ export function runGuardianScan(): void {
 export function startGuardian(): void {
   isGuardianActive = true;
 
-  if (document.getElementById(STATUS_ID)) {
+  if (statusPanel?.isConnected) {
     runGuardianScan();
     return;
   }
 
   const panel = document.createElement("div");
+  registerOwnUiRoot(panel);
   panel.id = STATUS_ID;
   panel.style.position = "fixed";
   panel.style.bottom = "20px";
@@ -345,6 +357,7 @@ export function startGuardian(): void {
   });
   panel.appendChild(killButton);
 
+  statusPanel = panel;
   document.body.appendChild(panel);
   requestAnimationFrame(() => {
     panel.style.opacity = "1";
@@ -363,8 +376,9 @@ export function stopGuardian(): void {
   hiddenBlocks.clear();
   revealedBlocks = new WeakMap<Element, string>();
 
-  const existing = document.getElementById(STATUS_ID);
+  const existing = statusPanel;
   if (!existing) return;
+  statusPanel = null;
   existing.style.opacity = "0";
   setTimeout(() => existing.remove(), 300);
 }

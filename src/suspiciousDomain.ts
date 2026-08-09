@@ -1,3 +1,4 @@
+import { parse } from "tldts";
 import { levenshtein } from "./levensthein";
 
 const knownBrands = [
@@ -576,6 +577,10 @@ function normalizeToken(value: string): string {
 function normalizeHostname(value: string): string {
   const trimmedValue = value.trim();
 
+  if (!trimmedValue) {
+    return "";
+  }
+
   try {
     const hasProtocol = /^[a-z][a-z\d+\-.]*:\/\//i.test(trimmedValue);
 
@@ -583,25 +588,10 @@ function normalizeHostname(value: string): string {
 
     return url.hostname
       .toLowerCase()
-      .replace(/^www\./, "")
       .replace(/\.$/, "");
   } catch {
-    return trimmedValue
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split(/[/?#]/)[0]
-      .split(":")[0]
-      .replace(/\.$/, "");
+    return "";
   }
-}
-
-function isOfficialDomain(hostname: string): boolean {
-  return officialDomains.some((officialDomain) => {
-    return (
-      hostname === officialDomain || hostname.endsWith(`.${officialDomain}`)
-    );
-  });
 }
 
 function createCharacterVariants(value: string): string[] {
@@ -643,63 +633,6 @@ function removeSuspiciousAdditions(value: string): string {
   return result.replace(/^\d+|\d+$/g, "");
 }
 
-function getDomainCandidates(hostname: string): string[] {
-  const candidates = new Set<string>();
-  const labels = hostname.split(".").filter(Boolean);
-
-  /*
-   * Pomijamy ostatni element domeny, ponieważ zazwyczaj jest to:
-   * com, pl, net, org itd.
-   */
-  const labelsWithoutTld = labels.slice(0, -1);
-
-  for (const label of labelsWithoutTld) {
-    const normalizedLabel = normalizeToken(label);
-
-    if (normalizedLabel.length >= 3) {
-      candidates.add(normalizedLabel);
-    }
-
-    /*
-     * Przykład:
-     * paypal-login -> paypal oraz login
-     */
-    const labelParts = label.split(/[-_]/);
-
-    for (const part of labelParts) {
-      const normalizedPart = normalizeToken(part);
-
-      if (normalizedPart.length >= 3) {
-        candidates.add(normalizedPart);
-      }
-    }
-
-    /*
-     * Przykład:
-     * paypallogin -> paypal
-     */
-    const withoutSuspiciousWords = removeSuspiciousAdditions(normalizedLabel);
-
-    if (withoutSuspiciousWords.length >= 3) {
-      candidates.add(withoutSuspiciousWords);
-    }
-  }
-
-  const candidatesWithVariants = new Set<string>();
-
-  for (const candidate of candidates) {
-    const variants = createCharacterVariants(candidate);
-
-    for (const variant of variants) {
-      if (variant.length >= 3) {
-        candidatesWithVariants.add(variant);
-      }
-    }
-  }
-
-  return Array.from(candidatesWithVariants);
-}
-
 function getAllowedDistance(brand: string): number {
   /*
    * Krótkie marki generują dużo fałszywych wyników.
@@ -720,49 +653,606 @@ const normalizedBrands = Array.from(
   new Set(knownBrands.map((brand) => normalizeToken(brand))),
 );
 
-export function isSuspiciousDomain(domain: string): boolean {
+/**
+ * A label receives the regional-domain policy only if the allowlist proves
+ * that the same label is already used as an official registrable domain. This
+ * scales to brands such as `huawei`, `lenovo` and `visa` without enumerating
+ * every country suffix, while aliases with no official root (for example
+ * `appleid`) remain high-risk outside the allowlist.
+ */
+const normalizedBrandSet = new Set(normalizedBrands);
+const regionalBrandLabels = new Set<string>();
+const officialBrandLabelForms = new Map<string, Set<string>>();
+
+for (const officialDomain of officialDomains) {
+  const parsedDomain = parse(officialDomain, {
+    allowPrivateDomains: true,
+    extractHostname: false,
+  });
+  const rawLabel = parsedDomain.domainWithoutSuffix?.toLowerCase() ?? "";
+  const normalizedLabel = normalizeToken(rawLabel);
+
+  if (!normalizedBrandSet.has(normalizedLabel)) {
+    continue;
+  }
+
+  regionalBrandLabels.add(normalizedLabel);
+
+  const forms = officialBrandLabelForms.get(normalizedLabel) ?? new Set();
+  forms.add(rawLabel);
+  officialBrandLabelForms.set(normalizedLabel, forms);
+}
+
+const riskyPublicSuffixes = new Set([
+  "buzz",
+  "cf",
+  "click",
+  "ga",
+  "gq",
+  "icu",
+  "ml",
+  "mov",
+  "tk",
+  "top",
+  "work",
+  "xyz",
+  "zip",
+]);
+
+/*
+ * Most of these are already represented in the private section of the Public
+ * Suffix List. The explicit entries also protect us if a provider changes or
+ * removes its PSL rule. In particular, `amazonaws.com` is an official Amazon
+ * domain but its tenants must not inherit Amazon's allowlist entry.
+ */
+const sharedHostingSuffixes = new Set([
+  "amazonaws.com",
+  "appspot.com",
+  "cloudfront.net",
+  "github.io",
+  "netlify.app",
+  "pages.dev",
+  "vercel.app",
+  "web.app",
+]);
+
+export type DomainMatchProvenance =
+  | "raw"
+  | "split"
+  | "addition-stripped"
+  | "leet"
+  | "fuzzy";
+
+export type SuspiciousDomainReason =
+  | "unverified-regional-brand"
+  | "non-regional-brand-domain"
+  | "suspicious-addition"
+  | "brand-in-foreign-subdomain"
+  | "character-substitution"
+  | "numeric-affix"
+  | "brand-label-obfuscation"
+  | "lookalike-spelling"
+  | "risky-public-suffix"
+  | "private-or-shared-hosting";
+
+export interface DomainAnalysis {
+  hostname: string;
+  isSuspicious: boolean;
+  score: number;
+  reasons: SuspiciousDomainReason[];
+  matchedBrand: string | null;
+  provenance: DomainMatchProvenance | null;
+}
+
+type CandidateLocation = "registrable" | "subdomain";
+
+interface DomainCandidate {
+  value: string;
+  provenance: Exclude<DomainMatchProvenance, "fuzzy">;
+  location: CandidateLocation;
+  normalizedLabel: string;
+  sourceLabel: string;
+}
+
+interface ParsedHostname {
+  domain: string | null;
+  domainWithoutSuffix: string | null;
+  publicSuffix: string | null;
+  subdomain: string | null;
+  isIcann: boolean | null;
+  isPrivate: boolean | null;
+  isIp: boolean | null;
+}
+
+interface MatchEvidence {
+  score: number;
+  reasons: SuspiciousDomainReason[];
+  matchedBrand: string;
+  provenance: DomainMatchProvenance;
+}
+
+const suspiciousScoreThreshold = 3;
+
+function emptyAnalysis(hostname: string): DomainAnalysis {
+  return {
+    hostname,
+    isSuspicious: false,
+    score: 0,
+    reasons: [],
+    matchedBrand: null,
+    provenance: null,
+  };
+}
+
+function isSharedHostingHostname(hostname: string): boolean {
+  return Array.from(sharedHostingSuffixes).some((suffix) => {
+    return hostname !== suffix && hostname.endsWith(`.${suffix}`);
+  });
+}
+
+function isOfficialDomain(
+  hostname: string,
+  parsedHostname: ParsedHostname,
+): boolean {
+  return officialDomains.some((officialDomain) => {
+    if (hostname === officialDomain) {
+      return true;
+    }
+
+    if (!hostname.endsWith(`.${officialDomain}`)) {
+      return false;
+    }
+
+    if (sharedHostingSuffixes.has(officialDomain)) {
+      return false;
+    }
+
+    /*
+     * A hostname below an official domain is trusted only while it stays inside
+     * the same registrable-domain boundary. This prevents a private PSL tenant
+     * from inheriting an allowlist entry owned by its hosting provider.
+     */
+    return parsedHostname.domain === officialDomain;
+  });
+}
+
+function getPlainRegionalBrand(
+  hostname: string,
+  parsedHostname: ParsedHostname,
+): string | null {
+  const registrableLabel = normalizeToken(
+    parsedHostname.domainWithoutSuffix ?? "",
+  );
+  const sourceLabel =
+    parsedHostname.domainWithoutSuffix?.toLowerCase() ?? "";
+
+  if (
+    !regionalBrandLabels.has(registrableLabel) ||
+    !isKnownBrandLabelForm(sourceLabel, registrableLabel)
+  ) {
+    return null;
+  }
+
+  if (
+    !parsedHostname.isIcann ||
+    parsedHostname.isPrivate ||
+    isSharedHostingHostname(hostname) ||
+    (parsedHostname.publicSuffix &&
+      riskyPublicSuffixes.has(parsedHostname.publicSuffix))
+  ) {
+    return null;
+  }
+
+  return registrableLabel;
+}
+
+function isKnownBrandLabelForm(sourceLabel: string, brand: string): boolean {
+  return (
+    sourceLabel === brand ||
+    officialBrandLabelForms.get(brand)?.has(sourceLabel) === true
+  );
+}
+
+function addCandidate(
+  candidates: DomainCandidate[],
+  seenCandidates: Set<string>,
+  value: string,
+  provenance: Exclude<DomainMatchProvenance, "fuzzy">,
+  location: CandidateLocation,
+  normalizedLabel: string,
+  sourceLabel: string,
+): void {
+  if (value.length < 3) {
+    return;
+  }
+
+  const key = `${location}:${normalizedLabel}:${provenance}:${value}`;
+
+  if (seenCandidates.has(key)) {
+    return;
+  }
+
+  seenCandidates.add(key);
+  candidates.push({
+    value,
+    provenance,
+    location,
+    normalizedLabel,
+    sourceLabel,
+  });
+}
+
+function getLabelCandidates(
+  label: string,
+  location: CandidateLocation,
+): DomainCandidate[] {
+  const candidates: DomainCandidate[] = [];
+  const seenCandidates = new Set<string>();
+  const normalizedLabel = normalizeToken(label);
+  const sourceLabel = label.toLowerCase();
+
+  addCandidate(
+    candidates,
+    seenCandidates,
+    normalizedLabel,
+    "raw",
+    location,
+    normalizedLabel,
+    sourceLabel,
+  );
+
+  for (const part of label.split(/[-_]/)) {
+    addCandidate(
+      candidates,
+      seenCandidates,
+      normalizeToken(part),
+      "split",
+      location,
+      normalizedLabel,
+      sourceLabel,
+    );
+  }
+
+  const withoutSuspiciousAdditions =
+    removeSuspiciousAdditions(normalizedLabel);
+
+  if (withoutSuspiciousAdditions !== normalizedLabel) {
+    addCandidate(
+      candidates,
+      seenCandidates,
+      withoutSuspiciousAdditions,
+      "addition-stripped",
+      location,
+      normalizedLabel,
+      sourceLabel,
+    );
+  }
+
+  for (const brand of normalizedBrands) {
+    const brandIndex = normalizedLabel.indexOf(brand);
+
+    if (brandIndex === -1) {
+      continue;
+    }
+
+    const beforeBrand = normalizedLabel.slice(0, brandIndex);
+    const afterBrand = normalizedLabel.slice(brandIndex + brand.length);
+    const hasExtraDigits = beforeBrand.length > 0 || afterBrand.length > 0;
+
+    if (
+      hasExtraDigits &&
+      /^\d*$/.test(beforeBrand) &&
+      /^\d*$/.test(afterBrand)
+    ) {
+      addCandidate(
+        candidates,
+        seenCandidates,
+        brand,
+        "addition-stripped",
+        location,
+        normalizedLabel,
+        sourceLabel,
+      );
+    }
+  }
+
+  const baseCandidates = [...candidates];
+
+  for (const candidate of baseCandidates) {
+    for (const variant of createCharacterVariants(candidate.value)) {
+      if (variant !== candidate.value) {
+        addCandidate(
+          candidates,
+          seenCandidates,
+          variant,
+          "leet",
+          location,
+          normalizedLabel,
+          sourceLabel,
+        );
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function getDomainCandidates(parsedHostname: ParsedHostname): DomainCandidate[] {
+  const candidates: DomainCandidate[] = [];
+
+  if (parsedHostname.domainWithoutSuffix) {
+    candidates.push(
+      ...getLabelCandidates(
+        parsedHostname.domainWithoutSuffix,
+        "registrable",
+      ),
+    );
+  }
+
+  if (parsedHostname.subdomain) {
+    for (const label of parsedHostname.subdomain.split(".").filter(Boolean)) {
+      candidates.push(...getLabelCandidates(label, "subdomain"));
+    }
+  }
+
+  return candidates;
+}
+
+function getAdditionsBesideBrand(
+  normalizedLabel: string,
+  brand: string,
+): string[] {
+  const brandIndex = normalizedLabel.indexOf(brand);
+
+  if (brandIndex === -1) {
+    return [];
+  }
+
+  /*
+   * Remove the matched brand before looking for additions. Otherwise brands
+   * such as `bankmillennium` would match the addition `bank` inside themselves.
+   */
+  const textBesideBrand =
+    normalizedLabel.slice(0, brandIndex) +
+    normalizedLabel.slice(brandIndex + brand.length);
+
+  return suspiciousAdditions.filter((addition) => {
+    return textBesideBrand.includes(normalizeToken(addition));
+  });
+}
+
+function getTextBesideBrand(normalizedLabel: string, brand: string): string {
+  const brandIndex = normalizedLabel.indexOf(brand);
+
+  if (brandIndex === -1) {
+    return "";
+  }
+
+  return (
+    normalizedLabel.slice(0, brandIndex) +
+    normalizedLabel.slice(brandIndex + brand.length)
+  );
+}
+
+function addReason(
+  evidence: MatchEvidence,
+  reason: SuspiciousDomainReason,
+  score: number,
+): void {
+  if (evidence.reasons.includes(reason)) {
+    return;
+  }
+
+  evidence.reasons.push(reason);
+  evidence.score += score;
+}
+
+function createEvidence(
+  candidate: DomainCandidate,
+  brand: string,
+  parsedHostname: ParsedHostname,
+  hostname: string,
+  fuzzyMatch: boolean,
+): MatchEvidence {
+  const provenance: DomainMatchProvenance = fuzzyMatch
+    ? "fuzzy"
+    : candidate.provenance;
+  const evidence: MatchEvidence = {
+    score: 0,
+    reasons: [],
+    matchedBrand: brand,
+    provenance,
+  };
+  const registrableBrand = normalizeToken(
+    parsedHostname.domainWithoutSuffix ?? "",
+  );
+  const brandIsInForeignSubdomain =
+    candidate.location === "subdomain" && registrableBrand !== brand;
+
+  if (fuzzyMatch) {
+    addReason(evidence, "lookalike-spelling", 3);
+  } else if (candidate.provenance === "leet") {
+    addReason(evidence, "character-substitution", 3);
+  } else if (brandIsInForeignSubdomain) {
+    addReason(evidence, "brand-in-foreign-subdomain", 3);
+  } else if (regionalBrandLabels.has(brand)) {
+    addReason(evidence, "unverified-regional-brand", 1);
+  } else {
+    addReason(evidence, "non-regional-brand-domain", 3);
+  }
+
+  if (
+    candidate.location === "registrable" &&
+    getAdditionsBesideBrand(candidate.normalizedLabel, brand).length > 0
+  ) {
+    addReason(evidence, "suspicious-addition", 2);
+  }
+
+  if (
+    candidate.location === "registrable" &&
+    /\d/.test(getTextBesideBrand(candidate.normalizedLabel, brand))
+  ) {
+    addReason(evidence, "numeric-affix", 2);
+  }
+
+  if (
+    candidate.location === "registrable" &&
+    normalizeToken(candidate.sourceLabel) === brand &&
+    !isKnownBrandLabelForm(candidate.sourceLabel, brand)
+  ) {
+    addReason(evidence, "brand-label-obfuscation", 2);
+  }
+
+  if (
+    parsedHostname.publicSuffix &&
+    riskyPublicSuffixes.has(parsedHostname.publicSuffix)
+  ) {
+    addReason(evidence, "risky-public-suffix", 2);
+  }
+
+  if (parsedHostname.isPrivate || isSharedHostingHostname(hostname)) {
+    addReason(evidence, "private-or-shared-hosting", 2);
+  }
+
+  return evidence;
+}
+
+const provenancePriority: Record<DomainMatchProvenance, number> = {
+  raw: 0,
+  split: 1,
+  "addition-stripped": 2,
+  fuzzy: 3,
+  leet: 4,
+};
+
+function isBetterEvidence(
+  candidate: MatchEvidence,
+  current: MatchEvidence | null,
+): boolean {
+  if (!current || candidate.score !== current.score) {
+    return !current || candidate.score > current.score;
+  }
+
+  const candidatePriority = provenancePriority[candidate.provenance];
+  const currentPriority = provenancePriority[current.provenance];
+
+  if (candidatePriority !== currentPriority) {
+    return candidatePriority > currentPriority;
+  }
+
+  return candidate.matchedBrand.length > current.matchedBrand.length;
+}
+
+export function analyzeDomain(domain: string): DomainAnalysis {
   const hostname = normalizeHostname(domain);
 
-  if (!hostname || !hostname.includes(".")) {
-    return false;
+  if (!hostname) {
+    return emptyAnalysis(hostname);
   }
 
-  if (isOfficialDomain(hostname)) {
-    return false;
+  const parsedHostname = parse(hostname, {
+    allowPrivateDomains: true,
+    extractHostname: false,
+  }) as ParsedHostname;
+
+  if (
+    parsedHostname.isIp ||
+    (!parsedHostname.isIcann && !parsedHostname.isPrivate) ||
+    !parsedHostname.domain ||
+    !parsedHostname.domainWithoutSuffix ||
+    !parsedHostname.publicSuffix
+  ) {
+    return emptyAnalysis(hostname);
   }
 
-  const candidates = getDomainCandidates(hostname);
+  if (isOfficialDomain(hostname, parsedHostname)) {
+    return emptyAnalysis(hostname);
+  }
 
-  return candidates.some((candidate) => {
-    return normalizedBrands.some((brand) => {
+  /*
+   * Accepting an exact company label on an ordinary public suffix is the
+   * deliberate regional-domain policy. Once that registrable domain is
+   * accepted, its subdomains inherit the same result: `mail.google.de` is not
+   * a case of a brand decorating a foreign domain. Risky and shared-hosting
+   * suffixes are intentionally excluded from this shortcut.
+   */
+  const plainRegionalBrand = getPlainRegionalBrand(hostname, parsedHostname);
+
+  if (plainRegionalBrand) {
+    return {
+      hostname,
+      isSuspicious: false,
+      score: 1,
+      reasons: ["unverified-regional-brand"],
+      matchedBrand: plainRegionalBrand,
+      provenance: "raw",
+    };
+  }
+
+  const candidates = getDomainCandidates(parsedHostname);
+  let bestEvidence: MatchEvidence | null = null;
+
+  for (const candidate of candidates) {
+    for (const brand of normalizedBrands) {
+      if (candidate.value === brand) {
+        const evidence = createEvidence(
+          candidate,
+          brand,
+          parsedHostname,
+          hostname,
+          false,
+        );
+
+        if (isBetterEvidence(evidence, bestEvidence)) {
+          bestEvidence = evidence;
+        }
+
+        continue;
+      }
+
       const allowedDistance = getAllowedDistance(brand);
 
-      /*
-       * Dokładna nazwa marki na nieoficjalnej domenie:
-       *
-       * paypal-login.com
-       * allegro-pomoc.net
-       * pkobp-logowanie.com
-       */
-      if (candidate === brand) {
-        return true;
+      if (
+        allowedDistance === 0 ||
+        Math.abs(candidate.value.length - brand.length) > allowedDistance
+      ) {
+        continue;
       }
 
-      if (allowedDistance === 0) {
-        return false;
+      const distance = levenshtein(candidate.value, brand);
+
+      if (distance === 0 || distance > allowedDistance) {
+        continue;
       }
 
-      /*
-       * Jeżeli różnica długości jest większa niż dopuszczalny
-       * dystans, nie ma potrzeby liczenia Levenshteina.
-       */
-      if (Math.abs(candidate.length - brand.length) > allowedDistance) {
-        return false;
+      const evidence = createEvidence(
+        candidate,
+        brand,
+        parsedHostname,
+        hostname,
+        true,
+      );
+
+      if (isBetterEvidence(evidence, bestEvidence)) {
+        bestEvidence = evidence;
       }
+    }
+  }
 
-      const distance = levenshtein(candidate, brand);
+  if (!bestEvidence) {
+    return emptyAnalysis(hostname);
+  }
 
-      return distance > 0 && distance <= allowedDistance;
-    });
-  });
+  return {
+    hostname,
+    isSuspicious: bestEvidence.score >= suspiciousScoreThreshold,
+    score: bestEvidence.score,
+    reasons: bestEvidence.reasons,
+    matchedBrand: bestEvidence.matchedBrand,
+    provenance: bestEvidence.provenance,
+  };
+}
+
+export function isSuspiciousDomain(domain: string): boolean {
+  return analyzeDomain(domain).isSuspicious;
 }

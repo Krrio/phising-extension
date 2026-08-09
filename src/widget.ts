@@ -1,10 +1,13 @@
 import { scanElement } from "./highlight";
+import { registerOwnUiRoot } from "./ownUi";
 
 const poppinsFonts = [
   { file: "Poppins-Regular.ttf", weight: 400 },
   { file: "Poppins-Medium.ttf", weight: 500 },
   { file: "Poppins-SemiBold.ttf", weight: 600 },
 ];
+
+let widgetRoot: HTMLElement | null = null;
 
 export function injectPoppinsFont(): void {
   const styleId = "phishing-extension-poppins-font";
@@ -34,15 +37,12 @@ export function injectPoppinsFont(): void {
 }
 
 export function createWidget(score: number, matches: string[]): void {
-  const existingWidget = document.getElementById("phishing-extension-widget");
-
-  if (existingWidget) {
-    existingWidget.remove();
-  }
+  widgetRoot?.remove();
 
   scanElement(document.body);
 
   const widget = document.createElement("div");
+  registerOwnUiRoot(widget);
 
   widget.id = "phishing-extension-widget";
   // widget.innerHTML = `
@@ -66,5 +66,6 @@ export function createWidget(score: number, matches: string[]): void {
   // widget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.3)";
   // widget.style.maxWidth = "360px";
 
+  widgetRoot = widget;
   document.body.appendChild(widget);
 }

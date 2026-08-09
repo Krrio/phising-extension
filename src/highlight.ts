@@ -1,6 +1,7 @@
 import { normalize } from "./normalize";
 import { findNearestPhrase } from "./phrases";
 import { extractHostname } from "./links";
+import { isInsideOwnUi } from "./ownUi";
 import { isSuspiciousDomain } from "./suspiciousDomain";
 
 export function highlightedNode(node: Node): void {
@@ -109,6 +110,8 @@ export function removeHighlights() {
 }
 
 export function scanElement(root: Node): void {
+  if (isInsideOwnUi(root)) return;
+
   const skippedElements = ["SCRIPT", "STYLE", "TEXTAREA"];
   let currentNode: Node | null;
   const nodeArray: Node[] = [];
@@ -121,19 +124,18 @@ export function scanElement(root: Node): void {
     if (!parent) return;
     if (skippedElements.includes(parent.tagName)) return;
     if (
-      parent.closest("#pg-panel") ||
-      parent.closest("#pg-selection-icon") ||
+      isInsideOwnUi(parent) ||
       parent.closest("mark[data-phishing-mark]")
     ) {
       return;
     }
-    if (parent.closest("#pg-panel") || parent.closest("#pg-selection-icon"))
-      return;
     highlightedNode(node);
   });
 }
 
 export function scanSuspiciousLinks(root: Element): void {
+  if (isInsideOwnUi(root)) return;
+
   injectMarkStyle();
 
   const links = Array.from(root.querySelectorAll<HTMLAnchorElement>("a"));
@@ -143,6 +145,8 @@ export function scanSuspiciousLinks(root: Element): void {
   }
 
   for (const link of Array.from(new Set(links))) {
+    if (isInsideOwnUi(link)) continue;
+
     const hostname = extractHostname(link.href);
 
     if (!hostname || !isSuspiciousDomain(hostname)) {

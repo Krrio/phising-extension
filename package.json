@@ -25,6 +25,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
-    "chart.js": "^4.5.1"
+    "chart.js": "^4.5.1",
+    "tldts": "^7.4.10"
   }
 }

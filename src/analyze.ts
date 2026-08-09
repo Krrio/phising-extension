@@ -5,6 +5,11 @@ import type {
   AnalyzeRequestMessage,
   AnalyzeResult,
 } from "./messages";
+import {
+  getRangeTextExcludingOwnUi,
+  getTextContentExcludingOwnUi,
+  isInsideOwnUi,
+} from "./ownUi";
 import { suspiciousWords } from "./phrases";
 import { isSuspiciousDomain } from "./suspiciousDomain";
 
@@ -32,11 +37,11 @@ function collectLinks(element: Element): HTMLAnchorElement[] {
     links.unshift(element);
   }
 
-  return Array.from(new Set(links));
+  return Array.from(new Set(links)).filter((link) => !isInsideOwnUi(link));
 }
 
 export async function analyzeElement(element: Element): Promise<AnalyzeResult> {
-  const content = element.textContent ?? "";
+  const content = getTextContentExcludingOwnUi(element);
   const foundPhrases = suspiciousWords.filter((phrase) =>
     content.includes(phrase),
   );
@@ -74,9 +79,10 @@ export async function analyzeElement(element: Element): Promise<AnalyzeResult> {
 export async function analyzeSelection(
   container: Element,
   range: Range,
-  selectedText: string,
-  phrases: string[],
+  _selectedText: string,
+  _phrases: string[],
 ): Promise<AnalyzeResult> {
+  const content = getRangeTextExcludingOwnUi(container, range);
   const foundMismatches: AnalyzePayload["signals"]["linkMismatches"] = [];
   const foundSuspiciousDomains = new Set<string>();
   const links = collectLinks(container);
@@ -98,9 +104,11 @@ export async function analyzeSelection(
   }
 
   const payload: AnalyzePayload = {
-    content: selectedText,
+    content,
     signals: {
-      suspiciousPhrases: phrases,
+      suspiciousPhrases: suspiciousWords.filter((phrase) =>
+        content.toLowerCase().includes(phrase.toLowerCase()),
+      ),
       linkMismatches: foundMismatches,
       suspiciousDomains: Array.from(foundSuspiciousDomains),
     },

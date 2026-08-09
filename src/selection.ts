@@ -6,6 +6,12 @@ import {
   scanElement,
   scanSuspiciousLinks,
 } from "./highlight";
+import {
+  getRangeTextExcludingOwnUi,
+  getTextContentExcludingOwnUi,
+  isInsideOwnUi,
+  registerOwnUiRoot,
+} from "./ownUi";
 import { suspiciousWords } from "./phrases";
 import { renderResult } from "./results";
 import { injectPoppinsFont } from "./widget";
@@ -16,6 +22,8 @@ let lastPhrases: string[] = [];
 let lastRange: Range | null = null;
 let lastContainer: Element | null = null;
 let lastAnalysisRoot: Element | null = null;
+let selectionIcon: HTMLElement | null = null;
+let selectionPanel: HTMLElement | null = null;
 
 function injectSpinnerStyle() {
   const styleId = "pg-spinner-style";
@@ -47,6 +55,7 @@ function createSpinner(): HTMLElement {
 
 function createIcon(): HTMLElement {
   const iconDiv = document.createElement("div");
+  registerOwnUiRoot(iconDiv);
   iconDiv.id = "pg-selection-icon";
   iconDiv.style.width = "24px";
   iconDiv.style.height = "24px";
@@ -88,6 +97,7 @@ function createIcon(): HTMLElement {
   iconDiv.appendChild(numberSpan);
 
   document.body.appendChild(iconDiv);
+  selectionIcon = iconDiv;
 
   requestAnimationFrame(() => {
     iconDiv.style.opacity = "1";
@@ -118,16 +128,14 @@ function updateIcon(iconDiv: HTMLElement, range: Range, count: number) {
 }
 
 function showIcon(range: Range, count: number) {
-  let iconDiv = document.getElementById("pg-selection-icon");
-  if (!iconDiv) {
-    iconDiv = createIcon();
-  }
+  const iconDiv = selectionIcon?.isConnected ? selectionIcon : createIcon();
   updateIcon(iconDiv, range, count);
 }
 
 function hideIcon() {
-  const existing = document.getElementById("pg-selection-icon");
+  const existing = selectionIcon;
   if (!existing) return;
+  selectionIcon = null;
   existing.style.opacity = "0";
   setTimeout(() => existing.remove(), 200);
 }
@@ -137,6 +145,7 @@ function createPanel(
   level: "limited" | "standard" | "full" | "guardian",
 ): HTMLElement {
   const panel = document.createElement("div");
+  registerOwnUiRoot(panel);
   panel.id = "pg-panel";
   panel.style.position = "fixed";
   panel.style.zIndex = "101";
@@ -299,7 +308,7 @@ function createPanel(
 async function showPanel(anchor?: HTMLElement) {
   hidePanel();
 
-  const ref = anchor ?? document.getElementById("pg-selection-icon");
+  const ref = anchor ?? selectionIcon;
   if (!ref) return;
 
   const stored = await chrome.storage.local.get("autonomyLevel");
@@ -310,6 +319,7 @@ async function showPanel(anchor?: HTMLElement) {
     | "guardian";
 
   const panel = createPanel(lastCount, level);
+  selectionPanel = panel;
   const rect = ref.getBoundingClientRect();
   const panelWidth = 300;
   const margin = 8;
@@ -328,8 +338,8 @@ async function showPanel(anchor?: HTMLElement) {
 }
 
 function hidePanel() {
-  const existing = document.getElementById("pg-panel");
-  if (existing) existing.remove();
+  selectionPanel?.remove();
+  selectionPanel = null;
 }
 
 function highlightSelection(range: Range) {
@@ -347,10 +357,12 @@ export function initSelectionListener() {
   injectMarkStyle();
 
   document.addEventListener("mouseup", (event) => {
-    const target = event.target as HTMLElement;
+    const target = event.target;
+    if (target instanceof Node && isInsideOwnUi(target)) {
+      return;
+    }
     if (
-      target.closest("#pg-selection-icon") ||
-      target.closest("#pg-panel") ||
+      target instanceof Element &&
       target.closest("mark[data-phishing-mark]")
     ) {
       return;
@@ -358,16 +370,9 @@ export function initSelectionListener() {
 
     const selection = window.getSelection();
     if (!selection) return;
-    const text = selection.toString();
+    const selectedText = selection.toString();
 
-    if (text.trim().length > 0) {
-      lastSelectedText = text;
-      const found = suspiciousWords.filter((word) =>
-        text.toLowerCase().includes(word.toLowerCase()),
-      );
-      lastCount = found.length;
-      lastPhrases = found;
-
+    if (selectedText.trim().length > 0) {
       const range = selection.getRangeAt(0);
       lastRange = range;
 
@@ -377,6 +382,14 @@ export function initSelectionListener() {
       }
       lastContainer = container as Element;
       lastAnalysisRoot = findAnalysisRoot(lastContainer);
+
+      const text = getRangeTextExcludingOwnUi(lastContainer, range);
+      lastSelectedText = text;
+      const found = suspiciousWords.filter((word) =>
+        text.toLowerCase().includes(word.toLowerCase()),
+      );
+      lastCount = found.length;
+      lastPhrases = found;
 
       showIcon(range, found.length);
       highlightSelection(range);
@@ -388,16 +401,17 @@ export function initSelectionListener() {
   });
 
   document.addEventListener("click", async (event) => {
-    const target = event.target as HTMLElement;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (isInsideOwnUi(target)) return;
     const mark = target.closest("mark[data-phishing-mark]");
     if (!mark) return;
-    if (mark.closest("#pg-panel")) return;
 
     const container = mark.parentElement;
     if (!container) return;
     lastContainer = container;
     lastAnalysisRoot = findAnalysisRoot(mark);
-    lastSelectedText = container.textContent ?? "";
+    lastSelectedText = getTextContentExcludingOwnUi(container);
     lastPhrases = suspiciousWords.filter((w) =>
       lastSelectedText.toLowerCase().includes(w.toLowerCase()),
     );
