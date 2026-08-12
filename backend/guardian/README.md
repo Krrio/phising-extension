@@ -39,6 +39,21 @@ This command initializes the guardian_classic Crew, assembling the agents and as
 
 This example, unmodified, will run the create a `report.md` file with the output of a research on LLMs in the root folder.
 
+## Domain registration cache
+
+The domain-age tool asks RDAP first and uses WHOIS only when the registry does
+not expose a usable registration date. Successful lookups and short-lived
+negative results are stored in SQLite at `.cache/registration_cache.db`.
+Override that path with `GUARDIAN_CACHE_DB=/path/to/cache.db`.
+
+The cache stores only the normalized registrable domain, registration timestamp,
+source, status and cache metadata; complete RDAP/WHOIS responses are not stored.
+Expired entries are pruned periodically, and LRU eviction keeps the cache below
+50,000 domains and keeps the complete SQLite file below 64 MiB. Maintenance
+runs at startup, at most once every six hours, or after 1,000 cache writes, so
+no separate cleanup process is required. The `.cache/` directory is
+intentionally ignored by Git.
+
 ## Understanding Your Crew
 
 The guardian_classic Crew is composed of multiple AI agents, each with unique roles, goals, and tools. These agents collaborate on a series of tasks, defined in `config/tasks.yaml`, leveraging their collective skills to achieve complex objectives. The `config/agents.yaml` file outlines the capabilities and configurations of each agent in your crew.

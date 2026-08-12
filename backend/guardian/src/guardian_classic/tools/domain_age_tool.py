@@ -1,22 +1,29 @@
+from datetime import datetime, timezone
 from typing import Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from guardian_classic.tools.domain_age_logic import get_domain_age_days
+from guardian_classic.tools.domain_age_logic import (
+    format_domain_registration,
+    get_domain_registration,
+)
+
 
 class DomainAgeInput(BaseModel):
     """Input schema for DomainAgeTool."""
 
     domains: str = Field(
         ...,
-        description="Lista domen do sprawdzenia, oddzielona przecinkami"
+        description="Lista domen do sprawdzenia, oddzielona przecinkami",
     )
+
 
 class DomainAgeTool(BaseTool):
     name: str = "Sprawdzanie wieku domeny"
     description: str = (
-        "Sprawdza w rejestrze WHOIS, jak dawno zarejestrowano domenę. "
+        "Sprawdza przez RDAP (z awaryjnym fallbackiem WHOIS), jak dawno "
+        "zarejestrowano domenę. "
         "Domeny zarejestrowane niedawno (poniżej 90 dni) są częstym narzędziem "
         "phishingu, ponieważ atakujący tworzą je na potrzeby jednej kampanii. "
         "Stary wiek domeny NIE oznacza automatycznie, że jest bezpieczna — "
@@ -32,14 +39,13 @@ class DomainAgeTool(BaseTool):
 
         results = []
         for domain in domain_list:
-            age = get_domain_age_days(domain)
-            if age is None:
-                results.append(f"{domain}: nie udało się ustalić daty rejestracji")
-            elif age < 90:
-                results.append(f"{domain}: zarejestrowana {age} dni temu — BARDZO ŚWIEŻA")
-            elif age < 365:
-                results.append(f"{domain}: zarejestrowana {age} dni temu (poniżej roku)")
-            else:
-                results.append(f"{domain}: zarejestrowana {age} dni temu (~{age // 365} lat)")
-            
+            registration = get_domain_registration(domain)
+            results.append(
+                format_domain_registration(
+                    domain,
+                    registration,
+                    as_of=datetime.now(timezone.utc),
+                )
+            )
+
         return "\n".join(results)

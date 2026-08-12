@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, TypeAlias
 from urllib.parse import urlparse
 
+import idna
 import tldextract
 from Levenshtein import distance as levenshtein
 
@@ -660,8 +661,12 @@ def normalize_hostname(value: str) -> str:
     try:
         parsed = urlparse(trimmed if has_protocol else f"https://{trimmed}")
         hostname = parsed.hostname or ""
-        return hostname.encode("idna").decode("ascii").lower().rstrip(".")
-    except (UnicodeError, ValueError):
+        return idna.encode(
+            hostname.rstrip("."),
+            uts46=True,
+            std3_rules=True,
+        ).decode("ascii").lower()
+    except (idna.IDNAError, ValueError):
         return ""
 
 

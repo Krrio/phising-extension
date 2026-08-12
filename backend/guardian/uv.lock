@@ -980,6 +980,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "crewai", extra = ["tools"] },
+    { name = "idna" },
     { name = "python-levenshtein" },
     { name = "python-whois" },
     { name = "tldextract" },
@@ -988,6 +989,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "crewai", extras = ["tools"], specifier = ">=1.15.8,<2.0.0" },
+    { name = "idna", specifier = ">=3.10,<4.0.0" },
     { name = "python-levenshtein", specifier = ">=0.27.3" },
     { name = "python-whois", specifier = ">=0.9.6" },
     { name = "tldextract", specifier = ">=5.3.2" },
