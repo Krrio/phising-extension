@@ -1,4 +1,4 @@
-import { extractHostname, hasLinkMismatch } from "./links";
+import { getLinkRisk } from "./linkRisk";
 import type {
   AnalyzeMessageResponse,
   AnalyzePayload,
@@ -7,11 +7,14 @@ import type {
 } from "./messages";
 import {
   getRangeTextExcludingOwnUi,
-  getTextContentExcludingOwnUi,
+  getVisibleTextContentExcludingOwnUi,
   isInsideOwnUi,
 } from "./ownUi";
+import {
+  isElementVisible,
+  isInsideEditableOrControl,
+} from "./domVisibility";
 import { suspiciousWords } from "./phrases";
-import { isSuspiciousDomain } from "./suspiciousDomain";
 
 async function requestAnalysis(payload: AnalyzePayload): Promise<AnalyzeResult> {
   const message: AnalyzeRequestMessage = { type: "ANALYZE", payload };
@@ -31,19 +34,27 @@ async function requestAnalysis(payload: AnalyzePayload): Promise<AnalyzeResult> 
 }
 
 function collectLinks(element: Element): HTMLAnchorElement[] {
-  const links = Array.from(element.querySelectorAll<HTMLAnchorElement>("a"));
+  const links = Array.from(element.querySelectorAll("a[href]")).filter(
+    (link): link is HTMLAnchorElement => link instanceof HTMLAnchorElement,
+  );
 
   if (element instanceof HTMLAnchorElement) {
     links.unshift(element);
   }
 
-  return Array.from(new Set(links)).filter((link) => !isInsideOwnUi(link));
+  return Array.from(new Set(links)).filter(
+    (link) =>
+      !isInsideOwnUi(link) &&
+      isElementVisible(link) &&
+      !isInsideEditableOrControl(link),
+  );
 }
 
 export async function analyzeElement(element: Element): Promise<AnalyzeResult> {
-  const content = getTextContentExcludingOwnUi(element);
+  const content = getVisibleTextContentExcludingOwnUi(element);
+  const normalizedContent = content.toLowerCase();
   const foundPhrases = suspiciousWords.filter((phrase) =>
-    content.includes(phrase),
+    normalizedContent.includes(phrase.toLowerCase()),
   );
 
   const foundMismatches: AnalyzePayload["signals"]["linkMismatches"] = [];
@@ -51,16 +62,15 @@ export async function analyzeElement(element: Element): Promise<AnalyzeResult> {
   const links = collectLinks(element);
 
   for (const link of links) {
-    const text = link.textContent?.trim() ?? "";
-    const href = link.href;
+    const text = getVisibleTextContentExcludingOwnUi(link);
+    const risk = getLinkRisk(text, link.href);
 
-    if (hasLinkMismatch(text, href)) {
-      foundMismatches.push({ text, href });
+    if (risk.mismatch) {
+      foundMismatches.push({ text, href: risk.effectiveHref });
     }
 
-    const hostname = extractHostname(href);
-    if (hostname && isSuspiciousDomain(hostname)) {
-      foundSuspiciousDomains.add(hostname);
+    if (risk.hostname && risk.suspiciousDomain) {
+      foundSuspiciousDomains.add(risk.hostname);
     }
   }
 
@@ -91,15 +101,14 @@ export async function analyzeSelection(
     if (!range.intersectsNode(link)) {
       continue;
     }
-    const text = link.textContent?.trim() ?? "";
-    const href = link.href;
-    if (hasLinkMismatch(text, href)) {
-      foundMismatches.push({ text, href });
+    const text = getVisibleTextContentExcludingOwnUi(link);
+    const risk = getLinkRisk(text, link.href);
+    if (risk.mismatch) {
+      foundMismatches.push({ text, href: risk.effectiveHref });
     }
 
-    const hostname = extractHostname(href);
-    if (hostname && isSuspiciousDomain(hostname)) {
-      foundSuspiciousDomains.add(hostname);
+    if (risk.hostname && risk.suspiciousDomain) {
+      foundSuspiciousDomains.add(risk.hostname);
     }
   }
 

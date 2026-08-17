@@ -11,6 +11,15 @@ import type {
 
 const ANALYZE_URL = "http://127.0.0.1:8000/analyze";
 const MAX_CONTENT_LENGTH = 100_000;
+const GUARDIAN_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_GUARDIAN_CONTENT_LENGTH = 8_000;
+const MAX_GUARDIAN_DOMAINS = 20;
+const MAX_GUARDIAN_PHRASES = 50;
+const MAX_GUARDIAN_LINK_MISMATCHES = 50;
+const MAX_DOMAIN_LENGTH = 253;
+const MAX_PHRASE_LENGTH = 200;
+const MAX_LINK_TEXT_LENGTH = 200;
+const MAX_HREF_LENGTH = 2_048;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -19,6 +28,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
+}
+
+function isBoundedStringArray(
+  value: unknown,
+  maxItems: number,
+  maxItemLength: number,
+): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= maxItems &&
+    value.every(
+      (item) => typeof item === "string" && item.length <= maxItemLength,
+    )
   );
 }
 
@@ -95,9 +118,25 @@ function isGuardianPayload(value: unknown): value is GuardianPayload {
   return (
     isRecord(value) &&
     typeof value.content === "string" &&
-    value.content.length <= MAX_CONTENT_LENGTH &&
-    isStringArray(value.domains) &&
-    isStringArray(value.phrases)
+    value.content.length <= MAX_GUARDIAN_CONTENT_LENGTH &&
+    isBoundedStringArray(
+      value.domains,
+      MAX_GUARDIAN_DOMAINS,
+      MAX_DOMAIN_LENGTH,
+    ) &&
+    isBoundedStringArray(
+      value.phrases,
+      MAX_GUARDIAN_PHRASES,
+      MAX_PHRASE_LENGTH,
+    ) &&
+    Array.isArray(value.linkMismatches) &&
+    value.linkMismatches.length <= MAX_GUARDIAN_LINK_MISMATCHES &&
+    value.linkMismatches.every(
+      (mismatch) =>
+        isLinkMismatch(mismatch) &&
+        mismatch.text.length <= MAX_LINK_TEXT_LENGTH &&
+        mismatch.href.length <= MAX_HREF_LENGTH,
+    )
   );
 }
 
@@ -114,18 +153,41 @@ function isGuardianRequestMessage(
 async function requestGuardianAnalysis(
   payload: GuardianPayload,
 ): Promise<AnalyzeResult> {
-  const response = await fetch("http://127.0.0.1:8000/guardian/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    GUARDIAN_REQUEST_TIMEOUT_MS,
+  );
+  let result: AnalyzeResult;
 
-  if (!response.ok) {
-    throw new Error(`Guardian backend returned status ${response.status}`);
+  try {
+    const response = await fetch("http://127.0.0.1:8000/guardian/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Guardian backend returned status ${response.status}`);
+    }
+
+    // Keep the timeout active while consuming the response body as well as
+    // while waiting for headers. A server can otherwise occupy a Guardian
+    // concurrency slot forever with a body that never completes.
+    result = (await response.json()) as AnalyzeResult;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Guardian analysis timed out.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 
-  const result = (await response.json()) as AnalyzeResult;
-  await saveToHistory(result);
+  // History is best-effort and must not hold the content script's Guardian
+  // slot if that optional endpoint is slow or unavailable.
+  void saveToHistory(result);
 
   return result;
 }

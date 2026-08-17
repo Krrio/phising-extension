@@ -1,4 +1,3 @@
-import { scanElement } from "./highlight";
 import { registerOwnUiRoot } from "./ownUi";
 
 const poppinsFonts = [
@@ -38,8 +37,6 @@ export function injectPoppinsFont(): void {
 
 export function createWidget(score: number, matches: string[]): void {
   widgetRoot?.remove();
-
-  scanElement(document.body);
 
   const widget = document.createElement("div");
   registerOwnUiRoot(widget);

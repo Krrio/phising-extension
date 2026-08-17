@@ -1,12 +1,25 @@
-import { findAnalysisRoot } from "./analysisScope";
+import {
+  collectAnalysisScopes,
+  resolveAnalysisScope,
+  type AnalysisScope,
+} from "./analysisScope";
 import {
   appendGuardianAuditEntry,
   createGuardianAuditEntry,
 } from "./guardianAudit";
-import { extractHostname } from "./links";
+import {
+  isElementSelfHidden,
+  isElementVisible,
+  isInsideEditableOrControl,
+} from "./domVisibility";
+import {
+  isExtensionDecoratedLink,
+  isExtensionMark,
+} from "./highlight";
+import { getLinkRisk } from "./linkRisk";
 import type { AnalyzeResult, GuardianMessageResponse } from "./messages";
 import {
-  getTextContentExcludingOwnUi,
+  getVisibleTextContentExcludingOwnUi,
   isInsideOwnUi,
   registerOwnUiRoot,
 } from "./ownUi";
@@ -14,18 +27,53 @@ import { suspiciousWords } from "./phrases";
 import { isSuspiciousDomain } from "./suspiciousDomain";
 
 const STATUS_ID = "pg-guardian-status";
-const MAX_CREW_CALLS_PER_PAGE = 3;
-const SCAN_DEBOUNCE_MS = 3000;
+const MAX_CREW_CALLS_PER_WINDOW = 8;
+const CREW_CALL_WINDOW_MS = 60_000;
+const MAX_CONCURRENT_CALLS = 2;
+const MAX_VERDICT_CACHE_ENTRIES = 100;
+const MAX_ANALYSIS_CONTENT_LENGTH = 8_000;
+const MIN_ANALYSIS_CONTENT_LENGTH = 1;
+const MAX_LINK_MISMATCHES = 50;
+const MAX_LINK_TEXT_LENGTH = 200;
+const MAX_HREF_LENGTH = 2_048;
+const ERROR_RETRY_COOLDOWN_MS = 60_000;
+const SCAN_THROTTLE_MS = 750;
 const HIDDEN_ATTR = "data-pg-hidden";
 const SHIELD_CLASS = "pg-guardian-shield";
+const HIDE_STYLE_ID = "pg-guardian-hide-style";
+const HIDE_TOKEN = `pg-${Date.now().toString(36)}-${Math.random()
+  .toString(36)
+  .slice(2)}`;
 
 const verdictCache = new Map<string, AnalyzeResult>();
-const hiddenBlocks = new Map<Element, { hash: string; restore: () => void }>();
-let revealedBlocks = new WeakMap<Element, string>();
-let crewCallCount = 0;
+interface HiddenBlockEntry {
+  fingerprint: string;
+  messageKey: string;
+  originalHiddenAttribute: string | null;
+  scope: AnalysisScope;
+  shield: HTMLElement;
+  restore: () => void;
+}
+
+const hiddenBlocks = new Map<Element, HiddenBlockEntry>();
+const revealedMessages = new Map<string, string>();
+const inFlight = new Set<string>();
+const failedUntil = new Map<string, number>();
+const crewCallTimestamps: number[] = [];
+let activeCrewCalls = 0;
 let scanTimer: ReturnType<typeof setTimeout> | undefined;
+let scanDueAt = Number.POSITIVE_INFINITY;
 let isGuardianActive = false;
 let statusPanel: HTMLElement | null = null;
+let guardianGeneration = 0;
+let hideStyle: HTMLStyleElement | null = null;
+
+export function isGuardianOwnedHideMutation(element: Element): boolean {
+  return (
+    hiddenBlocks.has(element) &&
+    element.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN
+  );
+}
 
 const UI_NOISE_SELECTOR = [
   "[role='status']",
@@ -37,65 +85,389 @@ const UI_NOISE_SELECTOR = [
   "button",
 ].join(",");
 
-function isAnalyzableBlock(block: Element): boolean {
-  if (block.closest(UI_NOISE_SELECTOR)) return false;
+function isAnalyzableBlock(
+  block: Element,
+  guardianHiddenTarget: Element | null = null,
+): boolean {
+  if (block.matches(UI_NOISE_SELECTOR)) return false;
   if (isInsideOwnUi(block)) return false;
+  if (isInsideEditableOrControl(block)) return false;
+  const visible =
+    guardianHiddenTarget &&
+    guardianHiddenTarget.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN &&
+    (guardianHiddenTarget === block || guardianHiddenTarget.contains(block)) ?
+      isVisibleWithinRoot(block, guardianHiddenTarget)
+    : isElementVisible(block);
+  if (!visible) return false;
 
-  const text = getTextContentExcludingOwnUi(block).trim();
-  return text.length >= 120 && text.length <= 8000;
-}
-
-function hashContent(text: string): string {
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return String(hash);
-}
-
-function collectCandidates(): Element[] {
-  const candidates = new Set<Element>();
-
-  const marks = document.querySelectorAll("mark[data-phishing-mark]");
-  for (const mark of Array.from(marks)) {
-    if (isInsideOwnUi(mark)) continue;
-    const block = findAnalysisRoot(mark);
-    if (block && isAnalyzableBlock(block)) candidates.add(block);
-  }
-
-  const links = document.querySelectorAll<HTMLAnchorElement>("a[href]");
-  for (const link of Array.from(links)) {
-    if (isInsideOwnUi(link)) continue;
-    const hostname = extractHostname(link.href);
-    if (!hostname || !isSuspiciousDomain(hostname)) continue;
-    const block = findAnalysisRoot(link);
-    if (block && isAnalyzableBlock(block)) candidates.add(block);
-  }
-
-  const list = Array.from(candidates);
-  return list.filter(
-    (block) => !list.some((other) => other !== block && block.contains(other)),
-  );
-}
-
-function shouldHide(verdict: AnalyzeResult): boolean {
+  const text = getVisibleTextContentExcludingOwnUi(block, {
+    ignoreRootVisibility:
+      guardianHiddenTarget === block &&
+      block.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN,
+  }).trim();
   return (
-    verdict.verdict === "phishing" &&
-    verdict.trustScore < 30 &&
-    verdict.confidence > 0.9
+    text.length >= MIN_ANALYSIS_CONTENT_LENGTH ||
+    block.querySelector("a[href]") !== null
   );
 }
 
-function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
-  if (!(block instanceof HTMLElement)) return;
-  if (isInsideOwnUi(block)) return;
-  if (!block.isConnected || !block.parentElement) return;
-  if (block.hasAttribute(HIDDEN_ATTR)) return;
+export function limitGuardianContent(
+  content: string,
+  maxLength = MAX_ANALYSIS_CONTENT_LENGTH,
+): string {
+  if (maxLength <= 0) return "";
+  if (content.length <= maxLength) return content;
 
-  const content = getTextContentExcludingOwnUi(block).trim();
-  block.setAttribute(HIDDEN_ATTR, "true");
-  const originalDisplay = block.style.display;
+  const separator = "\n[… pominięto środkową część wiadomości …]\n";
+  if (maxLength <= separator.length) return content.slice(0, maxLength);
+  const available = Math.max(0, maxLength - separator.length);
+  const beginningLength = Math.ceil(available * 0.6);
+  const endingLength = available - beginningLength;
+
+  return (
+    content.slice(0, beginningLength).trimEnd() +
+    separator +
+    content.slice(-endingLength).trimStart()
+  );
+}
+
+export interface GuardianFingerprintLink {
+  text: string;
+  href: string;
+}
+
+function compactHash(value: string): string {
+  let h1 = 1_779_033_703;
+  let h2 = 3_144_134_277;
+  let h3 = 1_013_904_242;
+  let h4 = 2_773_480_762;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    h1 = h2 ^ Math.imul(h1 ^ code, 597_399_067);
+    h2 = h3 ^ Math.imul(h2 ^ code, 2_869_860_233);
+    h3 = h4 ^ Math.imul(h3 ^ code, 951_274_213);
+    h4 = h1 ^ Math.imul(h4 ^ code, 2_716_044_179);
+  }
+
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597_399_067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2_869_860_233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951_274_213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2_716_044_179);
+
+  return [h1, h2, h3, h4]
+    .map((part) => (part >>> 0).toString(16).padStart(8, "0"))
+    .join("");
+}
+
+function guardianLinkToken(
+  link: string | GuardianFingerprintLink,
+): string {
+  const text =
+    typeof link === "string" ? ""
+    : canonicalizeFingerprintText(link.text);
+  const href = typeof link === "string" ? link : link.href;
+  return compactHash(`${text}\u0000${href}`);
+}
+
+function canonicalizeFingerprintText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function fingerprintFromLinkTokens(
+  messageKey: string,
+  content: string,
+  linkTokens: string[],
+): string {
+  const normalizedTokens = Array.from(new Set(linkTokens)).sort();
+  const canonicalContent = canonicalizeFingerprintText(content);
+  const material = `${messageKey}\u0002${canonicalContent}\u0002${normalizedTokens.join("\u0001")}`;
+  return `v4:${canonicalContent.length}:${normalizedTokens.length}:${compactHash(material)}`;
+}
+
+export function createGuardianFingerprint(
+  messageKey: string,
+  content: string,
+  links: Array<string | GuardianFingerprintLink>,
+): string {
+  return fingerprintFromLinkTokens(
+    messageKey,
+    content,
+    links.map(guardianLinkToken),
+  );
+}
+
+function isVisibleWithinRoot(element: Element, root: Element): boolean {
+  let current: Element | null = element;
+
+  while (current) {
+    const hiddenByGuardian =
+      current === root && current.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN;
+    if (!hiddenByGuardian && isElementSelfHidden(current)) return false;
+    if (current === root) return true;
+    current = current.parentElement;
+  }
+
+  return false;
+}
+
+function visibleLinks(scope: AnalysisScope): HTMLAnchorElement[] {
+  const links = Array.from(
+    scope.contentRoot.querySelectorAll("a[href]"),
+  ).filter(
+    (link): link is HTMLAnchorElement => link instanceof HTMLAnchorElement,
+  );
+  if (scope.contentRoot instanceof HTMLAnchorElement) {
+    links.unshift(scope.contentRoot);
+  }
+
+  return Array.from(new Set(links)).filter(
+    (link) =>
+      !isInsideOwnUi(link) &&
+      !isInsideEditableOrControl(link, scope.contentRoot) &&
+      isVisibleWithinRoot(link, scope.contentRoot),
+  );
+}
+
+function scopeContent(scope: AnalysisScope): string {
+  return getVisibleTextContentExcludingOwnUi(scope.contentRoot, {
+    ignoreRootVisibility:
+      scope.contentRoot.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN,
+  }).trim();
+}
+
+interface ScopeSnapshot {
+  content: string;
+  domains: string[];
+  fingerprint: string;
+  linkMismatches: Array<{ text: string; href: string }>;
+  phrases: string[];
+}
+
+function snapshotScope(scope: AnalysisScope): ScopeSnapshot {
+  const content = scopeContent(scope);
+  const links = visibleLinks(scope);
+  const domains = new Set<string>();
+  const linkMismatches: ScopeSnapshot["linkMismatches"] = [];
+  const fingerprintTokens: string[] = [];
+  const riskyDomains = new Set<string>();
+  const otherDomains = new Set<string>();
+
+  for (const link of links) {
+    const visibleText = getVisibleTextContentExcludingOwnUi(link);
+    const risk = getLinkRisk(visibleText, link.href);
+    const text = visibleText.slice(0, MAX_LINK_TEXT_LENGTH);
+    const href = risk.effectiveHref.slice(0, MAX_HREF_LENGTH);
+    fingerprintTokens.push(
+      guardianLinkToken({ text: visibleText, href: risk.effectiveHref }),
+    );
+
+    if (risk.mismatch && linkMismatches.length < MAX_LINK_MISMATCHES) {
+      linkMismatches.push({ text, href });
+    }
+    if (risk.hostname) {
+      if (risk.risky) {
+        riskyDomains.add(risk.hostname);
+      } else {
+        otherDomains.add(risk.hostname);
+      }
+    }
+  }
+
+  for (const hostname of [...riskyDomains, ...otherDomains]) {
+    if (domains.size >= 20) break;
+    domains.add(hostname);
+  }
+
+  const normalizedContent = content.toLowerCase();
+  const phrases = suspiciousWords.filter((word) =>
+    normalizedContent.includes(word.toLowerCase()),
+  );
+
+  return {
+    content,
+    domains: Array.from(domains),
+    fingerprint: fingerprintFromLinkTokens(
+      scope.messageKey,
+      content,
+      fingerprintTokens,
+    ),
+    linkMismatches,
+    phrases,
+  };
+}
+
+function hasLocalRisk(snapshot: ScopeSnapshot): boolean {
+  return (
+    snapshot.phrases.length > 0 ||
+    snapshot.linkMismatches.length > 0 ||
+    snapshot.domains.some((domain) => isSuspiciousDomain(domain))
+  );
+}
+
+function collectCandidates(
+  quarantinedScopes: AnalysisScope[] = [],
+): AnalysisScope[] {
+  const candidates = new Map<Element, AnalysisScope>();
+
+  const addCandidate = (
+    scope: AnalysisScope,
+    requireLocalRisk: boolean,
+    guardianHiddenTarget: Element | null = null,
+  ) => {
+    if (!isAnalyzableBlock(scope.contentRoot, guardianHiddenTarget)) return;
+    if (requireLocalRisk && !hasLocalRisk(snapshotScope(scope))) return;
+    candidates.set(scope.hideTarget, scope);
+  };
+
+  for (const scope of collectAnalysisScopes(document)) {
+    addCandidate(scope, true);
+  }
+
+  for (const scope of quarantinedScopes) {
+    // A previously confirmed phishing message must be revalidated even when
+    // Gmail temporarily removes the local phrase/link that first triggered it.
+    addCandidate(scope, false, scope.hideTarget);
+  }
+
+  // A selection-triggered scan can already have produced trusted extension
+  // indicators before a provider exposes a fully recognised message scope.
+  // They may be analysed as a fallback, but a fallback scope can never hide
+  // arbitrary page UI because `canAutoHide` remains false.
+  for (const indicator of Array.from(
+    document.querySelectorAll(
+      "mark[data-phishing-mark],a[data-phishing-suspicious-link]",
+    ),
+  )) {
+    const trusted =
+      isExtensionMark(indicator) || isExtensionDecoratedLink(indicator);
+    if (!trusted || !isElementVisible(indicator)) continue;
+    if (
+      Array.from(candidates.values()).some((scope) =>
+        scope.contentRoot.contains(indicator),
+      )
+    ) {
+      continue;
+    }
+    addCandidate(resolveAnalysisScope(indicator), true);
+  }
+
+  const scopes = Array.from(candidates.values());
+  return scopes.filter(
+    (scope) =>
+      !scopes.some(
+        (other) =>
+          other !== scope && scope.hideTarget.contains(other.hideTarget),
+      ),
+  );
+}
+
+export type GuardianVerdictAction = "none" | "warn" | "hide";
+
+export function getGuardianVerdictAction(
+  verdict: AnalyzeResult,
+): GuardianVerdictAction {
+  if (verdict.verdict === "safe") return "none";
+  if (
+    verdict.verdict === "phishing" &&
+    verdict.trustScore < 40 &&
+    verdict.confidence >= 0.8
+  ) {
+    return "hide";
+  }
+  return "warn";
+}
+
+export interface HiddenBlockReconciliationInput {
+  sameTarget: boolean;
+  sameMessageKey: boolean;
+  canAnalyze: boolean;
+  canAutoHide: boolean;
+  fingerprintMatches: boolean;
+}
+
+export type HiddenBlockReconciliation =
+  | "keep"
+  | "revalidate-hidden"
+  | "restore";
+
+export function getHiddenBlockReconciliation({
+  sameTarget,
+  sameMessageKey,
+  canAnalyze,
+  canAutoHide,
+  fingerprintMatches,
+}: HiddenBlockReconciliationInput): HiddenBlockReconciliation {
+  if (!sameTarget || !sameMessageKey || !canAnalyze || !canAutoHide) {
+    return "restore";
+  }
+  if (fingerprintMatches) return "keep";
+  return "revalidate-hidden";
+}
+
+function ensureHideStyle(): void {
+  if (hideStyle?.isConnected) return;
+
+  const style = document.createElement("style");
+  registerOwnUiRoot(style);
+  style.id = HIDE_STYLE_ID;
+  style.textContent = `[${HIDDEN_ATTR}="${HIDE_TOKEN}"] { display: none !important; }`;
+  (document.head ?? document.documentElement).appendChild(style);
+  hideStyle = style;
+}
+
+function rememberVerdict(fingerprint: string, verdict: AnalyzeResult): void {
+  verdictCache.delete(fingerprint);
+  verdictCache.set(fingerprint, verdict);
+
+  while (verdictCache.size > MAX_VERDICT_CACHE_ENTRIES) {
+    const oldest = verdictCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    verdictCache.delete(oldest);
+  }
+}
+
+function rememberReveal(messageKey: string, fingerprint: string): void {
+  revealedMessages.delete(messageKey);
+  revealedMessages.set(messageKey, fingerprint);
+
+  while (revealedMessages.size > MAX_VERDICT_CACHE_ENTRIES) {
+    const oldest = revealedMessages.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    revealedMessages.delete(oldest);
+  }
+}
+
+function hideBlock(
+  scope: AnalysisScope,
+  verdict: AnalyzeResult,
+  snapshot: ScopeSnapshot,
+  writeAudit = true,
+): boolean {
+  const block = scope.hideTarget;
+  if (!(block instanceof HTMLElement)) return false;
+  if (!scope.canAutoHide) return false;
+  if (isInsideOwnUi(block)) return false;
+  if (!block.isConnected || !block.parentElement) return false;
+  const previous = hiddenBlocks.get(block);
+  if (previous?.fingerprint === snapshot.fingerprint) return true;
+
+  ensureHideStyle();
+
+  const content = snapshot.content;
+  const originalHiddenAttribute =
+    previous?.originalHiddenAttribute ?? block.getAttribute(HIDDEN_ATTR);
+
+  // Replace the shield without restoring the quarantined message between two
+  // verdicts. This keeps changed phishing content from flashing on screen.
+  if (previous) {
+    previous.shield.remove();
+    hiddenBlocks.delete(block);
+  }
 
   const shield = document.createElement("div");
   registerOwnUiRoot(shield);
@@ -133,10 +505,22 @@ function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
   shield.appendChild(score);
 
   const restore = () => {
-    block.style.display = originalDisplay;
-    block.removeAttribute(HIDDEN_ATTR);
+    const current = hiddenBlocks.get(block);
+    if (current && current.shield !== shield) {
+      shield.remove();
+      return;
+    }
+    if (block.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN) {
+      if (originalHiddenAttribute === null) {
+        block.removeAttribute(HIDDEN_ATTR);
+      } else {
+        block.setAttribute(HIDDEN_ATTR, originalHiddenAttribute);
+      }
+    }
     shield.remove();
-    hiddenBlocks.delete(block);
+    if (hiddenBlocks.get(block)?.shield === shield) {
+      hiddenBlocks.delete(block);
+    }
   };
 
   const revealButton = document.createElement("button");
@@ -152,7 +536,15 @@ function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
   revealButton.style.cursor = "pointer";
   revealButton.style.fontFamily = "Poppins, sans-serif";
   revealButton.addEventListener("click", () => {
-    revealedBlocks.set(block, hash);
+    try {
+      const currentSeed =
+        scope.contentRoot.isConnected ? scope.contentRoot : block;
+      const currentScope = resolveAnalysisScope(currentSeed);
+      const currentSnapshot = snapshotScope(currentScope);
+      rememberReveal(currentScope.messageKey, currentSnapshot.fingerprint);
+    } catch {
+      rememberReveal(scope.messageKey, snapshot.fingerprint);
+    }
     restore();
     void appendGuardianAuditEntry(
       createGuardianAuditEntry(
@@ -165,108 +557,306 @@ function hideBlock(block: Element, verdict: AnalyzeResult, hash: string): void {
   });
   shield.appendChild(revealButton);
 
-  block.style.display = "none";
-  block.parentElement?.insertBefore(shield, block);
+  block.parentElement.insertBefore(shield, block);
+  block.setAttribute(HIDDEN_ATTR, HIDE_TOKEN);
 
-  hiddenBlocks.set(block, { hash, restore });
-  void appendGuardianAuditEntry(
-    createGuardianAuditEntry(
-      "hidden",
-      verdict,
-      content,
-      window.location.href,
-    ),
-  );
-}
-
-function releaseStaleBlocks(): void {
-  for (const [block, entry] of Array.from(hiddenBlocks)) {
-    if (!block.isConnected) {
-      hiddenBlocks.delete(block);
-      continue;
-    }
-
-    const currentHash = hashContent(
-      getTextContentExcludingOwnUi(block).trim(),
+  hiddenBlocks.set(block, {
+    fingerprint: snapshot.fingerprint,
+    messageKey: scope.messageKey,
+    originalHiddenAttribute,
+    scope,
+    shield,
+    restore,
+  });
+  if (writeAudit && !previous) {
+    void appendGuardianAuditEntry(
+      createGuardianAuditEntry(
+        "hidden",
+        verdict,
+        content,
+        window.location.href,
+      ),
     );
-    if (currentHash === entry.hash) continue;
-
-    entry.restore();
-
-    const cached = verdictCache.get(currentHash);
-    if (cached && shouldHide(cached)) {
-      hideBlock(block, cached, currentHash);
-    }
   }
+  return true;
 }
 
-async function analyzeCandidate(block: Element): Promise<void> {
-  if (isInsideOwnUi(block)) return;
+function applyGuardianVerdict(
+  scope: AnalysisScope,
+  verdict: AnalyzeResult,
+  snapshot: ScopeSnapshot,
+): void {
+  const action = getGuardianVerdictAction(verdict);
+  const existing = hiddenBlocks.get(scope.hideTarget);
 
-  const content = getTextContentExcludingOwnUi(block).trim();
-  if (content.length < 40) return;
-
-  const hash = hashContent(content);
-
-  if (revealedBlocks.get(block) === hash) return;
-
-  const cached = verdictCache.get(hash);
-  if (cached) {
-    if (shouldHide(cached)) {
-      hideBlock(block, cached, hash);
-      setGuardianStatus("threat", "Guardian ukrył zagrożenie");
-    }
+  if (action === "hide") {
+    const hidden = scope.canAutoHide && hideBlock(scope, verdict, snapshot);
+    if (!hidden) existing?.restore();
+    setGuardianStatus(
+      "threat",
+      hidden ?
+        "Guardian zablokował phishing"
+      : "Guardian wykrył phishing — mail pozostawiony",
+      verdict.reasoning,
+    );
     return;
   }
 
-  if (crewCallCount >= MAX_CREW_CALLS_PER_PAGE) return;
-  crewCallCount += 1;
+  existing?.restore();
 
-  const phrases = suspiciousWords.filter((word) =>
-    content.toLowerCase().includes(word.toLowerCase()),
-  );
-
-  const domains = new Set<string>();
-  for (const link of Array.from(
-    block.querySelectorAll<HTMLAnchorElement>("a[href]"),
-  )) {
-    if (isInsideOwnUi(link)) continue;
-    const hostname = extractHostname(link.href);
-    if (hostname && isSuspiciousDomain(hostname)) domains.add(hostname);
+  if (action === "warn") {
+    setGuardianStatus(
+      "warning",
+      `Podejrzany mail · ${verdict.trustScore}/100`,
+      verdict.reasoning,
+    );
+    return;
   }
 
+  // The scan scheduler restores the neutral state. A safe result must not
+  // overwrite a warning produced by another concurrent candidate.
+}
+
+function withoutGuardianHideRule<T>(operation: () => T): T {
+  const sheet = hideStyle?.sheet;
+  if (!sheet) return operation();
+
+  const wasDisabled = sheet.disabled;
+  sheet.disabled = true;
+  try {
+    return operation();
+  } finally {
+    sheet.disabled = wasDisabled;
+  }
+}
+
+function releaseStaleBlocks(): AnalysisScope[] {
+  const quarantinedScopes: AnalysisScope[] = [];
+
+  for (const [block, entry] of Array.from(hiddenBlocks)) {
+    if (!block.isConnected) {
+      entry.restore();
+      continue;
+    }
+
+    const seed =
+      entry.scope.contentRoot.isConnected ? entry.scope.contentRoot : block;
+    const reconciled = withoutGuardianHideRule(() => {
+      const currentScope = resolveAnalysisScope(seed);
+      if (!isElementVisible(currentScope.contentRoot)) return null;
+      return {
+        currentScope,
+        currentSnapshot: snapshotScope(currentScope),
+      };
+    });
+    if (!reconciled) {
+      entry.restore();
+      continue;
+    }
+
+    const { currentScope, currentSnapshot } = reconciled;
+    const reconciliation = getHiddenBlockReconciliation({
+      sameTarget: currentScope.hideTarget === block,
+      sameMessageKey: currentScope.messageKey === entry.messageKey,
+      canAnalyze: currentScope.canAnalyze,
+      canAutoHide: currentScope.canAutoHide,
+      fingerprintMatches:
+        currentSnapshot.fingerprint === entry.fingerprint,
+    });
+    if (reconciliation === "restore") {
+      entry.restore();
+      continue;
+    }
+
+    // Gmail may insert harmless text/comment nodes or temporarily detach our
+    // shield while reconciling its SPA tree. Repair the quarantine in place
+    // instead of exposing the message and starting the lifecycle again.
+    ensureHideStyle();
+    if (!block.parentElement) {
+      entry.restore();
+      continue;
+    }
+    if (
+      entry.shield.parentElement !== block.parentElement ||
+      entry.shield.nextElementSibling !== block
+    ) {
+      block.parentElement.insertBefore(entry.shield, block);
+    }
+    if (block.getAttribute(HIDDEN_ATTR) !== HIDE_TOKEN) {
+      block.setAttribute(HIDDEN_ATTR, HIDE_TOKEN);
+    }
+
+    entry.scope = currentScope;
+    if (reconciliation === "keep") continue;
+
+    // Keep the previous phishing verdict visible as a shield while the
+    // changed content is revalidated. The new verdict decides whether to
+    // update the shield or restore the message.
+    quarantinedScopes.push(currentScope);
+  }
+
+  return quarantinedScopes;
+}
+
+function pruneCrewCallWindow(now = Date.now()): void {
+  while (
+    crewCallTimestamps.length > 0 &&
+    now - crewCallTimestamps[0] >= CREW_CALL_WINDOW_MS
+  ) {
+    crewCallTimestamps.shift();
+  }
+}
+
+function nextRateLimitDelay(now = Date.now()): number {
+  pruneCrewCallWindow(now);
+  if (crewCallTimestamps.length < MAX_CREW_CALLS_PER_WINDOW) {
+    return SCAN_THROTTLE_MS;
+  }
+  return Math.max(
+    SCAN_THROTTLE_MS,
+    crewCallTimestamps[0] + CREW_CALL_WINDOW_MS - now + 50,
+  );
+}
+
+function crewCallBlockReason(): "concurrency" | "rate" | null {
+  const now = Date.now();
+  pruneCrewCallWindow(now);
+  if (activeCrewCalls >= MAX_CONCURRENT_CALLS) return "concurrency";
+  if (crewCallTimestamps.length >= MAX_CREW_CALLS_PER_WINDOW) return "rate";
+  return null;
+}
+
+function reserveCrewCall(): void {
+  activeCrewCalls += 1;
+  crewCallTimestamps.push(Date.now());
+}
+
+function rememberFailure(fingerprint: string): void {
+  failedUntil.delete(fingerprint);
+  failedUntil.set(fingerprint, Date.now() + ERROR_RETRY_COOLDOWN_MS);
+
+  while (failedUntil.size > MAX_VERDICT_CACHE_ENTRIES) {
+    const oldest = failedUntil.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    failedUntil.delete(oldest);
+  }
+}
+
+function restoreHiddenBlockForMessage(
+  block: Element,
+  messageKey: string,
+): void {
+  const entry = hiddenBlocks.get(block);
+  if (entry?.messageKey === messageKey) entry.restore();
+}
+
+async function analyzeCandidate(scope: AnalysisScope): Promise<void> {
+  const block = scope.hideTarget;
+  if (isInsideOwnUi(block)) return;
+
+  const snapshot = snapshotScope(scope);
+  if (
+    snapshot.content.length < MIN_ANALYSIS_CONTENT_LENGTH &&
+    snapshot.domains.length === 0 &&
+    snapshot.linkMismatches.length === 0
+  ) {
+    return;
+  }
+  if (revealedMessages.get(scope.messageKey) === snapshot.fingerprint) return;
+
+  const retryAt = failedUntil.get(snapshot.fingerprint);
+  if (retryAt !== undefined) {
+    if (retryAt > Date.now()) {
+      scheduleGuardianScan(retryAt - Date.now() + 50);
+      return;
+    }
+    failedUntil.delete(snapshot.fingerprint);
+  }
+
+  const cached = verdictCache.get(snapshot.fingerprint);
+  if (cached) {
+    applyGuardianVerdict(scope, cached, snapshot);
+    return;
+  }
+
+  if (inFlight.has(snapshot.fingerprint)) return;
+  const blockReason = crewCallBlockReason();
+  if (blockReason === "concurrency") return;
+  if (blockReason === "rate") {
+    scheduleGuardianScan(nextRateLimitDelay());
+    return;
+  }
+
+  reserveCrewCall();
+  const generation = guardianGeneration;
+  inFlight.add(snapshot.fingerprint);
   setGuardianStatus("scanning", "Guardian analizuje...");
 
   try {
     const verdict = await requestGuardianVerdict(
-      content,
-      Array.from(domains),
-      phrases,
+      limitGuardianContent(snapshot.content),
+      snapshot.domains,
+      snapshot.phrases,
+      snapshot.linkMismatches,
     );
 
-    verdictCache.set(hash, verdict);
+    if (!isGuardianActive || generation !== guardianGeneration) return;
+    rememberVerdict(snapshot.fingerprint, verdict);
 
     if (!block.isConnected) return;
-    if (hashContent(getTextContentExcludingOwnUi(block).trim()) !== hash) {
+    const currentSeed = scope.contentRoot.isConnected ? scope.contentRoot : block;
+    const currentScope = resolveAnalysisScope(currentSeed);
+    const currentSnapshot = snapshotScope(currentScope);
+    const quarantinedTarget = hiddenBlocks.has(block) ? block : null;
+    if (
+      currentScope.hideTarget !== block ||
+      currentScope.messageKey !== scope.messageKey ||
+      !currentScope.canAnalyze ||
+      !isAnalyzableBlock(currentScope.contentRoot, quarantinedTarget)
+    ) {
+      restoreHiddenBlockForMessage(block, scope.messageKey);
       runGuardianScan();
       return;
     }
 
-    if (shouldHide(verdict)) {
-      hideBlock(block, verdict, hash);
-      setGuardianStatus("threat", "Guardian ukrył zagrożenie");
-    } else {
-      setGuardianStatus("active", "Guardian aktywny");
+    if (quarantinedTarget && !currentScope.canAutoHide) {
+      restoreHiddenBlockForMessage(block, scope.messageKey);
+      runGuardianScan();
+      return;
     }
+
+    if (currentSnapshot.fingerprint !== snapshot.fingerprint) {
+      // The SPA changed the message again while the request was in flight.
+      // Keep the old shield and validate the latest snapshot next.
+      runGuardianScan();
+      return;
+    }
+
+    if (
+      revealedMessages.get(currentScope.messageKey) ===
+      currentSnapshot.fingerprint
+    ) {
+      hiddenBlocks.get(block)?.restore();
+      return;
+    }
+
+    applyGuardianVerdict(currentScope, verdict, currentSnapshot);
   } catch (error) {
+    if (!isGuardianActive || generation !== guardianGeneration) return;
+    rememberFailure(snapshot.fingerprint);
     console.error("[Guardian] błąd analizy:", error);
     setGuardianStatus("error", "Guardian: błąd analizy");
+  } finally {
+    inFlight.delete(snapshot.fingerprint);
+    activeCrewCalls = Math.max(0, activeCrewCalls - 1);
+    if (isGuardianActive) runGuardianScan();
   }
 }
 
 function setGuardianStatus(
-  state: "active" | "scanning" | "error" | "threat",
+  state: "active" | "scanning" | "warning" | "error" | "threat",
   text: string,
+  details = "",
 ): void {
   const panel = statusPanel;
   if (!panel) return;
@@ -276,28 +866,47 @@ function setGuardianStatus(
   if (!dot || !label) return;
 
   label.textContent = text;
+  panel.title = details;
   dot.style.background =
     state === "scanning" ? "#eab308"
+    : state === "warning" ? "#f59e0b"
     : state === "error" ? "#dc2626"
     : state === "threat" ? "#dc2626"
     : "#22c55e";
 }
 
-export function runGuardianScan(): void {
+function scheduleGuardianScan(delay = SCAN_THROTTLE_MS): void {
   if (!isGuardianActive) return;
 
-  releaseStaleBlocks();
+  const dueAt = Date.now() + Math.max(0, delay);
+  if (scanTimer !== undefined && scanDueAt <= dueAt) return;
 
   clearTimeout(scanTimer);
+  scanDueAt = dueAt;
+
   scanTimer = setTimeout(() => {
-    const candidates = collectCandidates();
-    for (const block of candidates) {
-      void analyzeCandidate(block);
+    scanTimer = undefined;
+    scanDueAt = Number.POSITIVE_INFINITY;
+    if (!isGuardianActive) return;
+
+    const quarantinedScopes = releaseStaleBlocks();
+    const candidates = collectCandidates(quarantinedScopes);
+    if (hiddenBlocks.size === 0 && inFlight.size === 0) {
+      setGuardianStatus("active", "Guardian aktywny");
     }
-  }, SCAN_DEBOUNCE_MS);
+    for (const scope of candidates) {
+      void analyzeCandidate(scope);
+    }
+  }, delay);
+}
+
+export function runGuardianScan(): void {
+  if (!isGuardianActive) return;
+  scheduleGuardianScan();
 }
 
 export function startGuardian(): void {
+  if (!isGuardianActive) guardianGeneration += 1;
   isGuardianActive = true;
 
   if (statusPanel?.isConnected) {
@@ -367,14 +976,20 @@ export function startGuardian(): void {
 
 export function stopGuardian(): void {
   isGuardianActive = false;
+  guardianGeneration += 1;
   clearTimeout(scanTimer);
-  crewCallCount = 0;
+  scanTimer = undefined;
+  scanDueAt = Number.POSITIVE_INFINITY;
+  crewCallTimestamps.length = 0;
+  failedUntil.clear();
 
   for (const [, entry] of Array.from(hiddenBlocks)) {
     entry.restore();
   }
   hiddenBlocks.clear();
-  revealedBlocks = new WeakMap<Element, string>();
+  revealedMessages.clear();
+  hideStyle?.remove();
+  hideStyle = null;
 
   const existing = statusPanel;
   if (!existing) return;
@@ -392,10 +1007,11 @@ async function requestGuardianVerdict(
   content: string,
   domains: string[],
   phrases: string[],
+  linkMismatches: Array<{ text: string; href: string }>,
 ): Promise<AnalyzeResult> {
   const response = (await chrome.runtime.sendMessage({
     type: "GUARDIAN_ANALYZE",
-    payload: { content, domains, phrases },
+    payload: { content, domains, phrases, linkMismatches },
   })) as GuardianMessageResponse | undefined;
 
   if (!response) throw new Error("Brak odpowiedzi od Guardiana.");

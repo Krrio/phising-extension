@@ -1,20 +1,35 @@
-import { runGuardianScan, startGuardian, stopGuardian } from "./agent";
-import { analyzeElement } from "./analyze";
 import {
+  isGuardianOwnedHideMutation,
+  runGuardianScan,
+  startGuardian,
+  stopGuardian,
+} from "./agent";
+import {
+  collectAnalysisScopes,
+  detectMailProvider,
+  resolveAnalysisScope,
+} from "./analysisScope";
+import { analyzeElement } from "./analyze";
+import { isElementVisible } from "./domVisibility";
+import {
+  isExtensionDecoratedLink,
+  isExtensionMark,
   removeHighlights,
   scanElement,
   scanSuspiciousLinks,
 } from "./highlight";
-import { extractHostname } from "./links";
+import { getLinkRisk } from "./linkRisk";
 import { normalize } from "./normalize";
 import {
-  getTextContentExcludingOwnUi,
+  getVisibleTextContentExcludingOwnUi,
   isInsideOwnUi,
   registerOwnUiRoot,
 } from "./ownUi";
 import { findNearestPhrase, suspiciousWords } from "./phrases";
-import { initSelectionListener } from "./selection";
-import { isSuspiciousDomain } from "./suspiciousDomain";
+import {
+  initSelectionListener,
+  setSelectionAutoHighlightMode,
+} from "./selection";
 import { createWidget, injectPoppinsFont } from "./widget";
 
 console.log("Phishing Extension content script loaded:", window.location.href);
@@ -23,18 +38,54 @@ let isFullScanActive = false;
 let suspiciousLinkModal: HTMLElement | null = null;
 
 function scanRiskIndicators(root: Node): void {
-  scanElement(root);
+  const start =
+    root instanceof Element ? root
+    : root.parentElement ? root.parentElement
+    : null;
+  if (!start || isInsideOwnUi(start)) return;
 
-  if (root instanceof Element) {
-    scanSuspiciousLinks(root);
+  const targets = new Set<Element>();
+  for (const scope of collectAnalysisScopes(start)) {
+    targets.add(scope.contentRoot);
   }
-  runGuardianScan();
+
+  const containingScope = resolveAnalysisScope(start);
+  if (
+    containingScope.canAnalyze &&
+    isElementVisible(containingScope.contentRoot)
+  ) {
+    targets.add(containingScope.contentRoot);
+  }
+
+  if (
+    targets.size === 0 &&
+    detectMailProvider(window.location.hostname) === "generic"
+  ) {
+    targets.add(start);
+  }
+
+  for (const target of targets) {
+    scanElement(target);
+    scanSuspiciousLinks(target);
+  }
 }
 
 function analyzePage(): void {
   injectPoppinsFont();
 
-  const pageText = getTextContentExcludingOwnUi(document.body).toLowerCase();
+  const scopes = collectAnalysisScopes(document);
+  const roots = new Set<Element>(scopes.map((scope) => scope.contentRoot));
+  if (
+    roots.size === 0 &&
+    detectMailProvider(window.location.hostname) === "generic"
+  ) {
+    roots.add(document.body);
+  }
+
+  const pageText = Array.from(roots)
+    .map((root) => getVisibleTextContentExcludingOwnUi(root))
+    .join(" ")
+    .toLowerCase();
 
   const matches = suspiciousWords.filter((word) =>
     pageText.includes(word.toLowerCase()),
@@ -43,10 +94,15 @@ function analyzePage(): void {
   const score = matches.length;
 
   createWidget(score, matches);
-  scanSuspiciousLinks(document.body);
+  for (const root of roots) {
+    scanElement(root);
+    scanSuspiciousLinks(root);
+  }
 
   console.log("Phishing analysis result:", {
     url: window.location.href,
+    detectedMessageScopes: scopes.length,
+    autoHideableScopes: scopes.filter((scope) => scope.canAutoHide).length,
     score,
     matches,
   });
@@ -71,7 +127,11 @@ function createModalButton(label: string): HTMLButtonElement {
   return button;
 }
 
-function showSuspiciousLinkModal(href: string, hostname: string): void {
+function showSuspiciousLinkModal(
+  href: string,
+  hostname: string,
+  mismatch: boolean,
+): void {
   closeSuspiciousLinkModal();
   injectPoppinsFont();
 
@@ -98,7 +158,7 @@ function showSuspiciousLinkModal(href: string, hostname: string): void {
   dialog.style.padding = "22px";
 
   const title = document.createElement("div");
-  title.textContent = "Podejrzana domena";
+  title.textContent = mismatch ? "Niezgodny adres linku" : "Podejrzana domena";
   title.style.fontSize = "20px";
   title.style.fontWeight = "700";
   title.style.marginBottom = "10px";
@@ -106,7 +166,9 @@ function showSuspiciousLinkModal(href: string, hostname: string): void {
 
   const message = document.createElement("p");
   message.textContent =
-    "Ta domena mocno przypomina znaną usługę i może prowadzić do phishingu. Czy na pewno chcesz ją otworzyć?";
+    mismatch ?
+      "Tekst widoczny w wiadomości wskazuje inny serwis niż rzeczywisty adres docelowy. To częsta technika phishingowa. Czy na pewno chcesz otworzyć ten link?"
+    : "Ta domena mocno przypomina znaną usługę i może prowadzić do phishingu. Czy na pewno chcesz ją otworzyć?";
   message.style.margin = "0 0 14px";
   message.style.color = "#3f3f46";
   message.style.fontSize = "14px";
@@ -169,26 +231,42 @@ function handleSuspiciousLinkClick(event: MouseEvent): void {
   if (!(target instanceof Element)) return;
   if (isInsideOwnUi(target)) return;
 
-  const link = target.closest<HTMLAnchorElement>("a[href]");
-  if (!link) return;
+  const link = target.closest("a[href]");
+  if (!(link instanceof HTMLAnchorElement)) return;
 
-  const hostname = extractHostname(link.href);
-  if (!hostname || !isSuspiciousDomain(hostname)) return;
+  const risk = getLinkRisk(
+    getVisibleTextContentExcludingOwnUi(link),
+    link.href,
+  );
+  if (!risk.risky || !risk.hostname) return;
 
   event.preventDefault();
   event.stopImmediatePropagation();
-  showSuspiciousLinkModal(link.href, hostname);
+  showSuspiciousLinkModal(link.href, risk.hostname, risk.mismatch);
 }
 
 function startFullScan(): void {
   isFullScanActive = true;
-  analyzePage();
-  observer.observe(document.body, observerOptions);
+  setSelectionAutoHighlightMode(true);
+  observer.disconnect();
+  try {
+    analyzePage();
+  } catch (error) {
+    console.error("Phishing Guard: błąd skanowania początkowego", error);
+  } finally {
+    if (isFullScanActive) {
+      observer.observe(document.body, observerOptions);
+    }
+  }
   runGuardianScan();
 }
 
 function stopFullScan(): void {
   isFullScanActive = false;
+  setSelectionAutoHighlightMode(false);
+  clearTimeout(debounceTimer);
+  debounceTimer = undefined;
+  pendingNodes.clear();
   closeSuspiciousLinkModal();
   observer.disconnect();
   removeHighlights();
@@ -233,15 +311,43 @@ async function init() {
   await syncFullScanFromStorage();
 }
 
-const observerOptions = { childList: true, subtree: true, characterData: true };
+const observerOptions: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  attributes: true,
+  attributeFilter: [
+    "href",
+    "hidden",
+    "inert",
+    "aria-hidden",
+    "aria-expanded",
+    "class",
+    "style",
+    "role",
+    "contenteditable",
+    "data-message-id",
+    "data-legacy-message-id",
+    "data-pg-hidden",
+  ],
+};
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 const pendingNodes = new Set<Node>();
 
 const observer = new MutationObserver((mutations) => {
+  if (!isFullScanActive) return;
+
+  let needsReconciliation = false;
+
   for (const mutation of mutations) {
+    if (isInsideOwnUi(mutation.target)) continue;
+
     if (mutation.type === "childList") {
+      if (mutation.removedNodes.length > 0) needsReconciliation = true;
+
       for (const addedNode of Array.from(mutation.addedNodes)) {
+        if (isInsideOwnUi(addedNode)) continue;
         if (addedNode.nodeType === Node.ELEMENT_NODE) {
           pendingNodes.add(addedNode);
         } else if (addedNode.parentElement) {
@@ -256,19 +362,63 @@ const observer = new MutationObserver((mutations) => {
         pendingNodes.add(parent);
       }
     }
+
+    if (mutation.type === "attributes" && mutation.target instanceof Element) {
+      if (
+        mutation.attributeName === "data-pg-hidden" &&
+        isGuardianOwnedHideMutation(mutation.target)
+      ) {
+        continue;
+      }
+      if (
+        mutation.attributeName === "style" &&
+        (isExtensionMark(mutation.target) ||
+          isExtensionDecoratedLink(mutation.target))
+      ) {
+        continue;
+      }
+      pendingNodes.add(mutation.target);
+    }
   }
 
-  clearTimeout(debounceTimer);
+  if (pendingNodes.size === 0 && !needsReconciliation) return;
+
+  if (debounceTimer !== undefined) return;
 
   debounceTimer = setTimeout(() => {
-    observer.disconnect();
-
-    for (const node of pendingNodes) {
-      scanRiskIndicators(node);
+    debounceTimer = undefined;
+    if (!isFullScanActive) {
+      pendingNodes.clear();
+      return;
     }
+
+    const batch = Array.from(pendingNodes).filter(
+      (node): node is Element => node instanceof Element && node.isConnected,
+    );
     pendingNodes.clear();
 
-    observer.observe(document.body, observerOptions);
+    const roots = batch.filter(
+      (node) =>
+        !batch.some(
+          (other) => other !== node && other.contains(node),
+        ),
+    );
+
+    observer.disconnect();
+    try {
+      for (const root of roots) {
+        try {
+          scanRiskIndicators(root);
+        } catch (error) {
+          console.error("Phishing Guard: błąd skanowania DOM", error);
+        }
+      }
+      runGuardianScan();
+    } finally {
+      if (isFullScanActive) {
+        observer.observe(document.body, observerOptions);
+      }
+    }
   }, 300);
 });
 

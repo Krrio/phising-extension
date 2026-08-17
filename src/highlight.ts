@@ -1,8 +1,37 @@
 import { normalize } from "./normalize";
 import { findNearestPhrase } from "./phrases";
-import { extractHostname } from "./links";
-import { isInsideOwnUi } from "./ownUi";
-import { isSuspiciousDomain } from "./suspiciousDomain";
+import { getLinkRisk } from "./linkRisk";
+import {
+  isElementVisible,
+  isInsideEditableOrControl,
+  shouldSkipContentSubtree,
+} from "./domVisibility";
+import {
+  getVisibleTextContentExcludingOwnUi,
+  isInsideOwnUi,
+} from "./ownUi";
+
+const extensionMarks = new WeakSet<Element>();
+interface LinkDecorationState {
+  style: string | null;
+  title: string | null;
+  suspiciousAttribute: string | null;
+}
+const decoratedLinks = new WeakMap<HTMLAnchorElement, LinkDecorationState>();
+
+export function isExtensionMark(
+  element: Element | null,
+): element is HTMLElement {
+  return element instanceof HTMLElement && extensionMarks.has(element);
+}
+
+export function isExtensionDecoratedLink(
+  element: Element,
+): element is HTMLAnchorElement {
+  return (
+    element instanceof HTMLAnchorElement && decoratedLinks.has(element)
+  );
+}
 
 export function highlightedNode(node: Node): void {
   const original = node.textContent ?? "";
@@ -34,6 +63,7 @@ export function highlightedNode(node: Node): void {
 
     const target = original.slice(originalStart, originalEnd);
     const mark = document.createElement("mark");
+    extensionMarks.add(mark);
     mark.dataset.phishingMark = "true";
     mark.textContent = target;
     mark.style.backgroundImage = "linear-gradient(#dc2626, #dc2626)";
@@ -73,8 +103,9 @@ export function highlightedNode(node: Node): void {
 }
 
 export function removeHighlights() {
-  const marks = document.querySelectorAll("mark[data-phishing-mark]");
+  const marks = document.querySelectorAll("mark");
   for (const mark of Array.from(marks)) {
+    if (!extensionMarks.has(mark)) continue;
     const parent = mark.parentNode;
     if (!parent) continue;
     const text = mark.textContent;
@@ -83,49 +114,83 @@ export function removeHighlights() {
     parent.removeChild(mark);
   }
 
-  const suspiciousLinks = document.querySelectorAll(
-    "a[data-phishing-suspicious-link]",
-  );
+  const suspiciousLinks = document.querySelectorAll("a");
 
   for (const link of Array.from(suspiciousLinks)) {
-    const originalStyle = link.getAttribute("data-phishing-original-style");
-    const originalTitle = link.getAttribute("data-phishing-original-title");
-
-    link.removeAttribute("data-phishing-suspicious-link");
-    link.removeAttribute("data-phishing-original-style");
-    link.removeAttribute("data-phishing-original-title");
-
-    if (originalStyle === null) {
-      link.removeAttribute("style");
-    } else {
-      link.setAttribute("style", originalStyle);
-    }
-
-    if (originalTitle === null) {
-      link.removeAttribute("title");
-    } else {
-      link.setAttribute("title", originalTitle);
-    }
+    if (link instanceof HTMLAnchorElement) restoreSuspiciousLink(link);
   }
+}
+
+function restoreAttribute(
+  element: Element,
+  name: string,
+  originalValue: string | null,
+): void {
+  if (originalValue === null) element.removeAttribute(name);
+  else element.setAttribute(name, originalValue);
+}
+
+function restoreSuspiciousLink(link: HTMLAnchorElement): void {
+  const original = decoratedLinks.get(link);
+  if (!original) return;
+
+  decoratedLinks.delete(link);
+  restoreAttribute(link, "style", original.style);
+  restoreAttribute(link, "title", original.title);
+  restoreAttribute(
+    link,
+    "data-phishing-suspicious-link",
+    original.suspiciousAttribute,
+  );
 }
 
 export function scanElement(root: Node): void {
   if (isInsideOwnUi(root)) return;
 
-  const skippedElements = ["SCRIPT", "STYLE", "TEXTAREA"];
+  if (
+    root instanceof Element &&
+    (!isElementVisible(root) || isInsideEditableOrControl(root))
+  ) {
+    return;
+  }
+
   let currentNode: Node | null;
   const nodeArray: Node[] = [];
-  const treeWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const visibilityCache = new WeakMap<Element, boolean>();
+  const treeWalker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
+
+        const element = node as Element;
+        if (
+          (node !== root && isInsideOwnUi(element)) ||
+          shouldSkipContentSubtree(element) ||
+          isInsideEditableOrControl(element) ||
+          !isElementVisible(element, null, visibilityCache)
+        ) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_SKIP;
+      },
+    },
+  );
   while ((currentNode = treeWalker.nextNode()) != null) {
-    nodeArray.push(currentNode);
+    if (currentNode.nodeType === Node.TEXT_NODE) nodeArray.push(currentNode);
   }
   nodeArray.forEach((node) => {
     const parent = node.parentElement;
     if (!parent) return;
-    if (skippedElements.includes(parent.tagName)) return;
+    if (shouldSkipContentSubtree(parent)) return;
+    const enclosingMark = parent.closest("mark[data-phishing-mark]");
     if (
       isInsideOwnUi(parent) ||
-      parent.closest("mark[data-phishing-mark]")
+      isInsideEditableOrControl(parent) ||
+      !isElementVisible(parent, null, visibilityCache) ||
+      isExtensionMark(enclosingMark)
     ) {
       return;
     }
@@ -135,10 +200,13 @@ export function scanElement(root: Node): void {
 
 export function scanSuspiciousLinks(root: Element): void {
   if (isInsideOwnUi(root)) return;
+  if (!isElementVisible(root) || isInsideEditableOrControl(root)) return;
 
   injectMarkStyle();
 
-  const links = Array.from(root.querySelectorAll<HTMLAnchorElement>("a"));
+  const links = Array.from(root.querySelectorAll("a[href]")).filter(
+    (link): link is HTMLAnchorElement => link instanceof HTMLAnchorElement,
+  );
 
   if (root instanceof HTMLAnchorElement) {
     links.unshift(root);
@@ -147,23 +215,29 @@ export function scanSuspiciousLinks(root: Element): void {
   for (const link of Array.from(new Set(links))) {
     if (isInsideOwnUi(link)) continue;
 
-    const hostname = extractHostname(link.href);
-
-    if (!hostname || !isSuspiciousDomain(hostname)) {
+    if (!isElementVisible(link) || isInsideEditableOrControl(link)) {
+      restoreSuspiciousLink(link);
       continue;
     }
 
-    if (link.dataset.phishingSuspiciousLink !== "true") {
-      const originalStyle = link.getAttribute("style");
-      const originalTitle = link.getAttribute("title");
+    const risk = getLinkRisk(
+      getVisibleTextContentExcludingOwnUi(link),
+      link.href,
+    );
 
-      if (originalStyle !== null) {
-        link.dataset.phishingOriginalStyle = originalStyle;
-      }
+    if (!risk.risky) {
+      restoreSuspiciousLink(link);
+      continue;
+    }
 
-      if (originalTitle !== null) {
-        link.dataset.phishingOriginalTitle = originalTitle;
-      }
+    if (!decoratedLinks.has(link)) {
+      decoratedLinks.set(link, {
+        style: link.getAttribute("style"),
+        title: link.getAttribute("title"),
+        suspiciousAttribute: link.getAttribute(
+          "data-phishing-suspicious-link",
+        ),
+      });
     }
 
     link.dataset.phishingSuspiciousLink = "true";
@@ -173,10 +247,13 @@ export function scanSuspiciousLinks(root: Element): void {
     link.style.backgroundSize = "0% 2px";
     link.style.transition = "background-size 0.3s ease";
     link.style.paddingBottom = "1px";
-    link.title = `Podejrzana domena: ${hostname}`;
+    link.title =
+      risk.mismatch ?
+        `Tekst linku nie zgadza się z celem: ${risk.hostname}`
+      : `Podejrzana domena: ${risk.hostname}`;
 
     requestAnimationFrame(() => {
-      link.style.backgroundSize = "100% 2px";
+      if (decoratedLinks.has(link)) link.style.backgroundSize = "100% 2px";
     });
   }
 }

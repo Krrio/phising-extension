@@ -40,6 +40,7 @@ export interface GuardianPayload {
   content: string;
   domains: string[];
   phrases: string[];
+  linkMismatches: LinkMismatchSignal[];
 }
 
 export interface GuardianAuditEntry {

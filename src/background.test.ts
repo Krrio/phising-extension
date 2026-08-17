@@ -25,6 +25,9 @@ const guardianMessage: GuardianRequestMessage = {
     content: "Pilnie potwierdź hasło.",
     domains: ["paypa1.com"],
     phrases: ["potwierdź hasło"],
+    linkMismatches: [
+      { text: "paypal.com", href: "https://paypa1.com/login" },
+    ],
   },
 };
 
@@ -77,7 +80,7 @@ function dispatchGuardianMessage(): {
 }
 
 describe("Guardian background flow", () => {
-  test("persists a successful Guardian verdict before responding", async () => {
+  test("responds even when best-effort history persistence is still pending", async () => {
     fetchMock
       .mockResolvedValueOnce(
         new Response(JSON.stringify(verdict), {
@@ -85,7 +88,7 @@ describe("Guardian background flow", () => {
           headers: { "Content-Type": "application/json" },
         }),
       )
-      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      .mockImplementationOnce(() => new Promise<Response>(() => undefined));
 
     const { keepAlive, response } = dispatchGuardianMessage();
 

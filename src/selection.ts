@@ -2,6 +2,7 @@ import { findAnalysisRoot } from "./analysisScope";
 import { analyzeElement, analyzeSelection } from "./analyze";
 import {
   injectMarkStyle,
+  isExtensionMark,
   removeHighlights,
   scanElement,
   scanSuspiciousLinks,
@@ -24,6 +25,11 @@ let lastContainer: Element | null = null;
 let lastAnalysisRoot: Element | null = null;
 let selectionIcon: HTMLElement | null = null;
 let selectionPanel: HTMLElement | null = null;
+let preserveAutomaticHighlights = false;
+
+export function setSelectionAutoHighlightMode(active: boolean): void {
+  preserveAutomaticHighlights = active;
+}
 
 function injectSpinnerStyle() {
   const styleId = "pg-spinner-style";
@@ -343,7 +349,7 @@ function hidePanel() {
 }
 
 function highlightSelection(range: Range) {
-  removeHighlights();
+  if (!preserveAutomaticHighlights) removeHighlights();
   let container = range.commonAncestorContainer;
   if (container.nodeType === Node.TEXT_NODE) {
     container = container.parentElement!;
@@ -363,7 +369,7 @@ export function initSelectionListener() {
     }
     if (
       target instanceof Element &&
-      target.closest("mark[data-phishing-mark]")
+      isExtensionMark(target.closest("mark[data-phishing-mark]"))
     ) {
       return;
     }
@@ -396,7 +402,7 @@ export function initSelectionListener() {
     } else {
       hideIcon();
       hidePanel();
-      removeHighlights();
+      if (!preserveAutomaticHighlights) removeHighlights();
     }
   });
 
@@ -405,7 +411,7 @@ export function initSelectionListener() {
     if (!(target instanceof Element)) return;
     if (isInsideOwnUi(target)) return;
     const mark = target.closest("mark[data-phishing-mark]");
-    if (!mark) return;
+    if (!isExtensionMark(mark)) return;
 
     const container = mark.parentElement;
     if (!container) return;
