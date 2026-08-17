@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-  appendGuardianAuditEntry,
   createGuardianAuditEntry,
+  persistGuardianAuditEntry,
 } from "./guardianAudit";
 import type { AnalyzeResult, GuardianAuditEntry } from "./messages";
 
@@ -11,6 +11,7 @@ const verdict: AnalyzeResult = {
   confidence: 0.97,
   reasoning: "Wiadomość wyłudza dane logowania.",
   categories: ["credential_request", "urgency"],
+  policyAssessment: null,
 };
 
 function makeEntry(
@@ -68,8 +69,8 @@ describe("appendGuardianAuditEntry", () => {
     const revealed = makeEntry("revealed", "2026-08-07T18:01:00.000Z");
 
     await Promise.all([
-      appendGuardianAuditEntry(hidden),
-      appendGuardianAuditEntry(revealed),
+      persistGuardianAuditEntry(hidden),
+      persistGuardianAuditEntry(revealed),
     ]);
 
     expect(log).toEqual([revealed, hidden]);
@@ -89,7 +90,7 @@ describe("appendGuardianAuditEntry", () => {
     vi.stubGlobal("chrome", { storage: { local: { get, set } } });
 
     const newest = makeEntry("revealed", "2026-08-07T18:02:00.000Z");
-    await appendGuardianAuditEntry(newest);
+    await persistGuardianAuditEntry(newest);
 
     expect(log).toHaveLength(100);
     expect(log[0]).toEqual(newest);

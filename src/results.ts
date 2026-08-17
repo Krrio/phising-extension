@@ -1,4 +1,6 @@
-export function renderResult(resultBox: HTMLElement, result: any) {
+import type { AnalyzeResult } from "./messages";
+
+export function renderResult(resultBox: HTMLElement, result: AnalyzeResult) {
   resultBox.style.display = "block";
   resultBox.innerHTML = "";
 
@@ -21,6 +23,23 @@ export function renderResult(resultBox: HTMLElement, result: any) {
   score.style.fontSize = "13px";
   score.style.marginBottom = "8px";
   resultBox.appendChild(score);
+
+  const policy = result.policyAssessment;
+  if (policy) {
+    const policyInfo = document.createElement("div");
+    policyInfo.style.fontSize = "12px";
+    policyInfo.style.lineHeight = "1.4";
+    policyInfo.style.marginBottom = "8px";
+    policyInfo.style.padding = "7px 9px";
+    policyInfo.style.borderRadius = "8px";
+    policyInfo.style.background = policy.violated ? "#fff7ed" : "#f4f4f5";
+    policyInfo.style.color = policy.violated ? "#9a3412" : "#52525b";
+    policyInfo.textContent =
+      policy.violated ?
+        `Polityka organizacji wpłynęła na ocenę${policy.summary ? `: ${policy.summary}` : "."}`
+      : `Uwzględniono politykę: ${policy.policyFileName}`;
+    resultBox.appendChild(policyInfo);
+  }
 
   const reasoning = document.createElement("div");
   reasoning.textContent = result.reasoning;

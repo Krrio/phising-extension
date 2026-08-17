@@ -12,6 +12,16 @@ export interface AnalyzePayload {
   };
 }
 
+export type PolicyInfluence = "none" | "supporting" | "material";
+
+export interface PolicyAssessment {
+  violated: boolean;
+  influence: PolicyInfluence;
+  summary: string | null;
+  policyHash: string;
+  policyFileName: string;
+}
+
 export interface AnalyzeResult {
   trustScore: number;
   verdict: "safe" | "suspicious" | "phishing";
@@ -25,6 +35,12 @@ export interface AnalyzeResult {
     | "suspicious_domain"
     | "financial"
   >;
+  /**
+   * `null` means that no valid organization policy was used for this
+   * particular analysis. It is intentionally part of the verdict snapshot so
+   * the UI and audit log never infer policy influence from free-form text.
+   */
+  policyAssessment: PolicyAssessment | null;
 }
 
 export interface AnalyzeRequestMessage {
@@ -52,7 +68,17 @@ export interface GuardianAuditEntry {
   reasoning: string;
   categories: string[];
   excerpt: string;
+  policyAssessment: PolicyAssessment | null;
 }
+
+export interface GuardianAuditRequestMessage {
+  type: "APPEND_GUARDIAN_AUDIT";
+  entry: GuardianAuditEntry;
+}
+
+export type GuardianAuditMessageResponse =
+  | { ok: true }
+  | { ok: false; error: string };
 
 export interface GuardianRequestMessage {
   type: "GUARDIAN_ANALYZE";

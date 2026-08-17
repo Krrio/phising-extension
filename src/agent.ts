@@ -25,6 +25,7 @@ import {
 } from "./ownUi";
 import { suspiciousWords } from "./phrases";
 import { isSuspiciousDomain } from "./suspiciousDomain";
+import { loadOrganizationPolicy } from "./organizationPolicy";
 
 const STATUS_ID = "pg-guardian-status";
 const MAX_CREW_CALLS_PER_WINDOW = 8;
@@ -44,6 +45,7 @@ const HIDE_STYLE_ID = "pg-guardian-hide-style";
 const HIDE_TOKEN = `pg-${Date.now().toString(36)}-${Math.random()
   .toString(36)
   .slice(2)}`;
+const NO_POLICY_REVISION = "none";
 
 const verdictCache = new Map<string, AnalyzeResult>();
 interface HiddenBlockEntry {
@@ -67,6 +69,9 @@ let isGuardianActive = false;
 let statusPanel: HTMLElement | null = null;
 let guardianGeneration = 0;
 let hideStyle: HTMLStyleElement | null = null;
+let organizationPolicyRevision: string | null = null;
+let organizationPolicyFileName: string | null = null;
+let policyLoadGeneration = 0;
 
 export function isGuardianOwnedHideMutation(element: Element): boolean {
   return (
@@ -182,22 +187,25 @@ function fingerprintFromLinkTokens(
   messageKey: string,
   content: string,
   linkTokens: string[],
+  policyRevision: string,
 ): string {
   const normalizedTokens = Array.from(new Set(linkTokens)).sort();
   const canonicalContent = canonicalizeFingerprintText(content);
-  const material = `${messageKey}\u0002${canonicalContent}\u0002${normalizedTokens.join("\u0001")}`;
-  return `v4:${canonicalContent.length}:${normalizedTokens.length}:${compactHash(material)}`;
+  const material = `${messageKey}\u0002${policyRevision}\u0002${canonicalContent}\u0002${normalizedTokens.join("\u0001")}`;
+  return `v5:${canonicalContent.length}:${normalizedTokens.length}:${compactHash(material)}`;
 }
 
 export function createGuardianFingerprint(
   messageKey: string,
   content: string,
   links: Array<string | GuardianFingerprintLink>,
+  policyRevision = NO_POLICY_REVISION,
 ): string {
   return fingerprintFromLinkTokens(
     messageKey,
     content,
     links.map(guardianLinkToken),
+    policyRevision,
   );
 }
 
@@ -295,6 +303,7 @@ function snapshotScope(scope: AnalysisScope): ScopeSnapshot {
       scope.messageKey,
       content,
       fingerprintTokens,
+      organizationPolicyRevision ?? NO_POLICY_REVISION,
     ),
     linkMismatches,
     phrases,
@@ -306,6 +315,14 @@ function hasLocalRisk(snapshot: ScopeSnapshot): boolean {
     snapshot.phrases.length > 0 ||
     snapshot.linkMismatches.length > 0 ||
     snapshot.domains.some((domain) => isSuspiciousDomain(domain))
+  );
+}
+
+export function guardianRequiresLocalRisk(
+  policyRevision: string | null,
+): boolean {
+  return (
+    policyRevision === null || policyRevision === NO_POLICY_REVISION
   );
 }
 
@@ -324,8 +341,15 @@ function collectCandidates(
     candidates.set(scope.hideTarget, scope);
   };
 
+  const requireLocalRisk = guardianRequiresLocalRisk(
+    organizationPolicyRevision,
+  );
   for (const scope of collectAnalysisScopes(document)) {
-    addCandidate(scope, true);
+    // Without an organization policy, the local risk gate protects quota and
+    // privacy. With a policy enabled, a message can violate an organization-
+    // specific rule without matching any built-in phrase/domain heuristic, so
+    // recognised mail scopes must reach the policy-aware analysis.
+    addCandidate(scope, requireLocalRisk);
   }
 
   for (const scope of quarantinedScopes) {
@@ -504,6 +528,27 @@ function hideBlock(
   score.style.marginBottom = "14px";
   shield.appendChild(score);
 
+  if (
+    verdict.policyAssessment &&
+    (verdict.policyAssessment.violated ||
+      verdict.policyAssessment.influence !== "none")
+  ) {
+    const policy = document.createElement("div");
+    policy.style.fontSize = "12px";
+    policy.style.lineHeight = "1.45";
+    policy.style.color = "#9a3412";
+    policy.style.background = "#ffedd5";
+    policy.style.borderRadius = "8px";
+    policy.style.padding = "8px 10px";
+    policy.style.marginBottom = "14px";
+    policy.textContent = `Polityka ${verdict.policyAssessment.policyFileName} wpłynęła na decyzję${
+      verdict.policyAssessment.summary ?
+        `: ${verdict.policyAssessment.summary}`
+      : "."
+    }`;
+    shield.appendChild(policy);
+  }
+
   const restore = () => {
     const current = hiddenBlocks.get(block);
     if (current && current.shield !== shield) {
@@ -588,6 +633,8 @@ function applyGuardianVerdict(
 ): void {
   const action = getGuardianVerdictAction(verdict);
   const existing = hiddenBlocks.get(scope.hideTarget);
+  const policySignal =
+    verdict.policyAssessment?.violated ? " · naruszenie polityki" : "";
 
   if (action === "hide") {
     const hidden = scope.canAutoHide && hideBlock(scope, verdict, snapshot);
@@ -595,8 +642,8 @@ function applyGuardianVerdict(
     setGuardianStatus(
       "threat",
       hidden ?
-        "Guardian zablokował phishing"
-      : "Guardian wykrył phishing — mail pozostawiony",
+        `Guardian zablokował phishing${policySignal}`
+      : `Guardian wykrył phishing — mail pozostawiony${policySignal}`,
       verdict.reasoning,
     );
     return;
@@ -607,7 +654,7 @@ function applyGuardianVerdict(
   if (action === "warn") {
     setGuardianStatus(
       "warning",
-      `Podejrzany mail · ${verdict.trustScore}/100`,
+      `Podejrzany mail${policySignal} · ${verdict.trustScore}/100`,
       verdict.reasoning,
     );
     return;
@@ -801,6 +848,15 @@ async function analyzeCandidate(scope: AnalysisScope): Promise<void> {
     );
 
     if (!isGuardianActive || generation !== guardianGeneration) return;
+    const verdictPolicyRevision =
+      verdict.policyAssessment?.policyHash ?? NO_POLICY_REVISION;
+    if (verdictPolicyRevision !== organizationPolicyRevision) {
+      // Background always binds the verdict to the policy snapshot it used.
+      // If storage changed while the request was running, refresh identity and
+      // re-run instead of applying an obsolete organizational decision.
+      void refreshOrganizationPolicyContext();
+      return;
+    }
     rememberVerdict(snapshot.fingerprint, verdict);
 
     if (!block.isConnected) return;
@@ -865,7 +921,11 @@ function setGuardianStatus(
   const label = panel.querySelector<HTMLElement>(".pg-guardian-label");
   if (!dot || !label) return;
 
-  label.textContent = text;
+  const policySuffix =
+    organizationPolicyFileName ?
+      ` · polityka: ${shortPolicyName(organizationPolicyFileName)}`
+    : "";
+  label.textContent = `${text}${policySuffix}`;
   panel.title = details;
   dot.style.background =
     state === "scanning" ? "#eab308"
@@ -876,7 +936,7 @@ function setGuardianStatus(
 }
 
 function scheduleGuardianScan(delay = SCAN_THROTTLE_MS): void {
-  if (!isGuardianActive) return;
+  if (!isGuardianActive || organizationPolicyRevision === null) return;
 
   const dueAt = Date.now() + Math.max(0, delay);
   if (scanTimer !== undefined && scanDueAt <= dueAt) return;
@@ -901,8 +961,79 @@ function scheduleGuardianScan(delay = SCAN_THROTTLE_MS): void {
 }
 
 export function runGuardianScan(): void {
-  if (!isGuardianActive) return;
+  if (!isGuardianActive || organizationPolicyRevision === null) return;
   scheduleGuardianScan();
+}
+
+function shortPolicyName(fileName: string): string {
+  const compact = fileName.replace(/\s+/g, " ").trim();
+  return compact.length <= 28 ? compact : `${compact.slice(0, 27)}…`;
+}
+
+async function refreshOrganizationPolicyContext(): Promise<void> {
+  const loadGeneration = ++policyLoadGeneration;
+
+  try {
+    const policy = await loadOrganizationPolicy();
+    if (
+      loadGeneration !== policyLoadGeneration ||
+      !isGuardianActive
+    ) {
+      return;
+    }
+
+    const nextRevision = policy?.contentHash ?? NO_POLICY_REVISION;
+    const previousRevision = organizationPolicyRevision;
+    organizationPolicyRevision = nextRevision;
+    organizationPolicyFileName = policy?.fileName ?? null;
+
+    if (
+      previousRevision !== null &&
+      previousRevision !== nextRevision
+    ) {
+      // Policy is part of the security identity. Old cache entries, cooldowns,
+      // reveals and in-flight responses cannot cross policy revisions.
+      guardianGeneration += 1;
+      verdictCache.clear();
+      failedUntil.clear();
+      revealedMessages.clear();
+    }
+
+    if (hiddenBlocks.size === 0 && inFlight.size === 0) {
+      setGuardianStatus("active", "Guardian aktywny");
+    }
+    scheduleGuardianScan(0);
+  } catch (error) {
+    if (loadGeneration !== policyLoadGeneration || !isGuardianActive) return;
+    console.error("[Guardian] nie udało się wczytać polityki:", error);
+    // Fail closed for already quarantined phishing: keep its shield (which
+    // still offers "Pokaż mimo to"), stop new remote decisions, and expose a
+    // recoverable error. The popup can replace or remove the invalid record.
+    setGuardianStatus(
+      "error",
+      "Guardian: błąd polityki",
+      "Zastąp lub usuń uszkodzoną politykę w popupie rozszerzenia.",
+    );
+  }
+}
+
+export function handleOrganizationPolicyChange(_newValue: unknown): void {
+  // Any write is invalidated synchronously, before async hash verification.
+  // A structurally valid record can still contain content that does not match
+  // its declared SHA-256; retaining the previous revision even briefly would
+  // let an old in-flight result cross that storage boundary.
+  guardianGeneration += 1;
+  policyLoadGeneration += 1;
+  verdictCache.clear();
+  failedUntil.clear();
+  revealedMessages.clear();
+  organizationPolicyRevision = null;
+  organizationPolicyFileName = null;
+  clearTimeout(scanTimer);
+  scanTimer = undefined;
+  scanDueAt = Number.POSITIVE_INFINITY;
+  if (!isGuardianActive) return;
+  void refreshOrganizationPolicyContext();
 }
 
 export function startGuardian(): void {
@@ -910,7 +1041,7 @@ export function startGuardian(): void {
   isGuardianActive = true;
 
   if (statusPanel?.isConnected) {
-    runGuardianScan();
+    void refreshOrganizationPolicyContext();
     return;
   }
 
@@ -945,7 +1076,7 @@ export function startGuardian(): void {
 
   const label = document.createElement("span");
   label.className = "pg-guardian-label";
-  label.textContent = "Guardian aktywny";
+  label.textContent = "Guardian wczytuje politykę…";
   panel.appendChild(label);
 
   const killButton = document.createElement("button");
@@ -971,12 +1102,15 @@ export function startGuardian(): void {
   requestAnimationFrame(() => {
     panel.style.opacity = "1";
   });
-  runGuardianScan();
+  void refreshOrganizationPolicyContext();
 }
 
 export function stopGuardian(): void {
   isGuardianActive = false;
   guardianGeneration += 1;
+  policyLoadGeneration += 1;
+  organizationPolicyRevision = null;
+  organizationPolicyFileName = null;
   clearTimeout(scanTimer);
   scanTimer = undefined;
   scanDueAt = Number.POSITIVE_INFINITY;

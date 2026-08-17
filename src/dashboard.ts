@@ -1,5 +1,6 @@
 import Chart from "chart.js/auto";
 import type { GuardianAuditEntry } from "./messages";
+import { isGuardianAuditEntry } from "./guardianAudit";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -187,7 +188,10 @@ async function renderAuditLog(): Promise<void> {
   const stored = (await chrome.storage.local.get("guardianAuditLog")) as {
     guardianAuditLog?: GuardianAuditEntry[];
   };
-  const log = stored.guardianAuditLog ?? [];
+  const log =
+    Array.isArray(stored.guardianAuditLog) ?
+      stored.guardianAuditLog.filter(isGuardianAuditEntry)
+    : [];
 
   container.innerHTML = "";
 
@@ -241,6 +245,20 @@ function createAuditCard(entry: GuardianAuditEntry): HTMLElement {
   reasoning.className = "text-sm text-zinc-600 mb-2";
   reasoning.textContent = entry.reasoning;
   card.appendChild(reasoning);
+
+  if (entry.policyAssessment) {
+    const policy = document.createElement("div");
+    policy.className = `mb-2 rounded-lg px-2.5 py-1.5 text-xs ${
+      entry.policyAssessment.violated ?
+        "bg-amber-100 text-amber-800"
+      : "bg-zinc-100 text-zinc-600"
+    }`;
+    policy.textContent =
+      entry.policyAssessment.violated ?
+        `Polityka ${entry.policyAssessment.policyFileName}: ${entry.policyAssessment.summary ?? "wykryto naruszenie"}`
+      : `Analiza z polityką: ${entry.policyAssessment.policyFileName}`;
+    card.appendChild(policy);
+  }
 
   const meta = document.createElement("div");
   meta.className = "flex items-center gap-3 text-xs text-zinc-500";

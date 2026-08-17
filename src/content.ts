@@ -1,9 +1,11 @@
 import {
+  handleOrganizationPolicyChange,
   isGuardianOwnedHideMutation,
   runGuardianScan,
   startGuardian,
   stopGuardian,
 } from "./agent";
+import { ORGANIZATION_POLICY_STORAGE_KEY } from "./organizationPolicy";
 import {
   collectAnalysisScopes,
   detectMailProvider,
@@ -305,6 +307,11 @@ async function init() {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.enabled || changes.autonomyLevel) {
       void syncFullScanFromStorage();
+    }
+    if (changes[ORGANIZATION_POLICY_STORAGE_KEY]) {
+      handleOrganizationPolicyChange(
+        changes[ORGANIZATION_POLICY_STORAGE_KEY].newValue,
+      );
     }
   });
 

@@ -3,6 +3,7 @@ import {
   createGuardianFingerprint,
   getGuardianVerdictAction,
   getHiddenBlockReconciliation,
+  guardianRequiresLocalRisk,
   limitGuardianContent,
 } from "./agent";
 import type { AnalyzeResult } from "./messages";
@@ -14,6 +15,7 @@ function verdict(
     ...result,
     reasoning: "test",
     categories: [],
+    policyAssessment: null,
   };
 }
 
@@ -100,6 +102,29 @@ describe("Guardian content identity", () => {
 
     expect(changed).not.toBe(baseline);
   });
+
+  test("invalidates the fingerprint when organization policy changes", () => {
+    const withPolicyA = createGuardianFingerprint(
+      "gmail:message",
+      "same content",
+      [],
+      "sha256:policy-a",
+    );
+    const withPolicyB = createGuardianFingerprint(
+      "gmail:message",
+      "same content",
+      [],
+      "sha256:policy-b",
+    );
+    const withoutPolicy = createGuardianFingerprint(
+      "gmail:message",
+      "same content",
+      [],
+    );
+
+    expect(withPolicyA).not.toBe(withPolicyB);
+    expect(withPolicyA).not.toBe(withoutPolicy);
+  });
 });
 
 describe("Guardian content limit", () => {
@@ -115,6 +140,14 @@ describe("Guardian content limit", () => {
 
   test("does not alter content already within the limit", () => {
     expect(limitGuardianContent("short message", 100)).toBe("short message");
+  });
+});
+
+describe("Guardian organization policy discovery", () => {
+  test("lets an active policy introduce risk beyond local heuristics", () => {
+    expect(guardianRequiresLocalRisk(null)).toBe(true);
+    expect(guardianRequiresLocalRisk("none")).toBe(true);
+    expect(guardianRequiresLocalRisk("a".repeat(64))).toBe(false);
   });
 });
 

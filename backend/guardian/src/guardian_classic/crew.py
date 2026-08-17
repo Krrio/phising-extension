@@ -17,7 +17,7 @@ class GuardianClassic():
     def orkiestrator(self) -> Agent:
         return Agent(
             config=self.agents_config['orkiestrator'],
-            verbose=True
+            verbose=False
         )
 
     @agent
@@ -25,14 +25,14 @@ class GuardianClassic():
         return Agent(
             config=self.agents_config['analityk_domen'],
             tools=[SuspiciousDomainTool(), DomainAgeTool()],
-            verbose=True
+            verbose=False
         )
 
     @agent
     def analityk_tresci(self) -> Agent:
         return Agent(
             config=self.agents_config['analityk_tresci'],
-            verbose=True
+            verbose=False
         )
 
     @task
@@ -61,5 +61,5 @@ class GuardianClassic():
             agents=self.agents,
             tasks=self.tasks,
             process=Process.sequential,
-            verbose=True,
+            verbose=False,
         )
