@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type {
   AnalyzeRequestMessage,
   AnalyzeResult,
@@ -89,10 +97,9 @@ const guardianMessage: GuardianRequestMessage = {
   payload: {
     content: "Pilnie potwierdź hasło.",
     domains: ["paypa1.com"],
+    trustedDomains: [],
     phrases: ["potwierdź hasło"],
-    linkMismatches: [
-      { text: "paypal.com", href: "https://paypa1.com/login" },
-    ],
+    linkMismatches: [{ text: "paypal.com", href: "https://paypa1.com/login" }],
   },
 };
 

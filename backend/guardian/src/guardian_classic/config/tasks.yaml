@@ -11,6 +11,11 @@ badanie_domen_task:
     są częstym narzędziem phishingu, ale stara domena nie jest automatycznie
     bezpieczna.
     Zwróć listę domen uznanych za podejrzane wraz z krótkim uzasadnieniem.
+    Domeny potwierdzone jako oficjalne: {trusted_domains}.
+    Te domeny znajdują się na zweryfikowanej liście oficjalnych adresów
+    znanych marek. Zaznacz to wyraźnie w raporcie — link prowadzący
+    wyłącznie na potwierdzoną domenę oficjalną jest silnym sygnałem
+    legalnej komunikacji.
   expected_output: >
     Lista podejrzanych domen z uzasadnieniem, uwzględniająca zarówno
     podobieństwo nazwy do znanych marek, jak i wiek rejestracji.
@@ -72,6 +77,9 @@ synteza_task:
     material. Przy braku naruszenia ustaw violated=false, influence=none oraz
     summary=null. Przy naruszeniu podaj krótkie summary. Nie wymyślaj ani nie
     kopiuj metadanych polityki — policyHash i policyFileName dołączy API.
+    Pole influence opisuje wyłącznie wpływ NARUSZENIA polityki na werdykt.
+    Zgodność z polityką nie jest jej wpływem: nawet gdy polityka pomogła uznać
+    wiadomość za bezpieczną, ustaw violated=false, influence=none i summary=null.
     Jeśli sygnały sobie przeczą, wyjaśnij, który przeważa i dlaczego.
     Oceń trustScore według skali, gdzie 100 oznacza treść w pełni bezpieczną,
     a 0 jednoznaczny phishing: 90-100 brak oznak ryzyka, 70-89 drobne
@@ -80,6 +88,20 @@ synteza_task:
     40-69, phishing przy 0-39.
     Dla treści bezpiecznej zwróć pustą listę categories.
     confidence oznacza pewność Twojej oceny, nie poziom zagrożenia.
+    Gdy wszystkie linki prowadzą wyłącznie na potwierdzone oficjalne domeny
+    marki, pod którą wiadomość się podpisuje, nie ma rozjazdów linków ani
+    podejrzanych domen, potwierdzenie nadawcy jest sygnałem silniejszym niż
+    cechy treści. Kwota, numer konta, termin płatności, link do panelu
+    klienta ani załącznik z fakturą NIE obniżają wtedy trustScore — to
+    standardowe elementy rozliczeń, nie oznaki oszustwa. Oceniaj w przedziale
+    80-100 i nie używaj werdyktu "suspicious", chyba że treść prosi o hasło,
+    kod jednorazowy, dane karty albo o zalogowanie się przez link inny niż
+    oficjalna domena marki.
+    Zasady polityki organizacji stosuj wyłącznie do wiadomości mieszczących
+    się w jej zakresie. Jeśli polityka opisuje komunikację konkretnej
+    instytucji, a analizowana wiadomość pochodzi od innego podmiotu, ustaw
+    violated=false i oceniaj wyłącznie według zasad ogólnych. Nigdy nie
+    przenoś zakazu z jednej organizacji na komunikację innej.
   expected_output: >
     Obiekt z polami: trustScore (0-100), verdict (safe, suspicious lub phishing),
     confidence (0.0-1.0), reasoning (krótkie uzasadnienie po polsku),

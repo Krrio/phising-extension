@@ -56,6 +56,7 @@ export interface GuardianPayload {
   content: string;
   domains: string[];
   phrases: string[];
+  trustedDomains: string[];
   linkMismatches: LinkMismatchSignal[];
 }
 

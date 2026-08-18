@@ -140,6 +140,11 @@ function isGuardianPayload(value: unknown): value is GuardianPayload {
       MAX_DOMAIN_LENGTH,
     ) &&
     isBoundedStringArray(
+      value.trustedDomains,
+      MAX_GUARDIAN_DOMAINS,
+      MAX_DOMAIN_LENGTH,
+    ) &&
+    isBoundedStringArray(
       value.phrases,
       MAX_GUARDIAN_PHRASES,
       MAX_PHRASE_LENGTH,
@@ -185,6 +190,7 @@ async function requestGuardianAnalysis(
         // message evidence, but it can never provide or override the policy.
         content: payload.content,
         domains: [...payload.domains],
+        trustedDomains: [...payload.trustedDomains],
         phrases: [...payload.phrases],
         linkMismatches: payload.linkMismatches.map(({ text, href }) => ({
           text,
@@ -196,16 +202,15 @@ async function requestGuardianAnalysis(
     });
 
     if (!response.ok) {
+      const detail = await response.text();
+      console.error("[Guardian] backend detail:", detail);
       throw new Error(`Guardian backend returned status ${response.status}`);
     }
 
     // Keep the timeout active while consuming the response body as well as
     // while waiting for headers. A server can otherwise occupy a Guardian
     // concurrency slot forever with a body that never completes.
-    result = normalizeAnalyzeResult(
-      await response.json(),
-      organizationPolicy,
-    );
+    result = normalizeAnalyzeResult(await response.json(), organizationPolicy);
   } catch (error) {
     if (controller.signal.aborted) {
       throw new Error("Guardian analysis timed out.");
@@ -224,10 +229,7 @@ async function requestGuardianAnalysis(
 
 chrome.runtime.onMessage.addListener(
   (message: unknown, sender, sendResponse) => {
-    if (
-      isRecord(message) &&
-      message.type === "APPEND_GUARDIAN_AUDIT"
-    ) {
+    if (isRecord(message) && message.type === "APPEND_GUARDIAN_AUDIT") {
       if (
         sender.id !== chrome.runtime.id ||
         !isGuardianAuditEntry(message.entry)
@@ -290,78 +292,82 @@ chrome.runtime.onMessage.addListener(
 
 function createResponseSchema(hasOrganizationPolicy: boolean) {
   return {
-  type: "json_schema",
-  json_schema: {
-    name: "analyze_response",
-    strict: true,
-    schema: {
-      type: "object",
-      properties: {
-        trustScore: { type: "integer", minimum: 0, maximum: 100 },
-        verdict: { type: "string", enum: ["safe", "suspicious", "phishing"] },
-        confidence: { type: "number", minimum: 0, maximum: 1 },
-        reasoning: { type: "string" },
-        categories: {
-          type: "array",
-          items: {
-            type: "string",
-            enum: [
-              "credential_request",
-              "urgency",
-              "impersonation",
-              "suspicious_link",
-              "suspicious_domain",
-              "financial",
+    type: "json_schema",
+    json_schema: {
+      name: "analyze_response",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          trustScore: { type: "integer", minimum: 0, maximum: 100 },
+          verdict: { type: "string", enum: ["safe", "suspicious", "phishing"] },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          reasoning: { type: "string" },
+          categories: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "credential_request",
+                "urgency",
+                "impersonation",
+                "suspicious_link",
+                "suspicious_domain",
+                "financial",
+              ],
+            },
+          },
+          policyAssessment: {
+            anyOf: [
+              ...(!hasOrganizationPolicy ? [{ type: "null" }] : []),
+              ...(hasOrganizationPolicy ?
+                [
+                  {
+                    type: "object",
+                    properties: {
+                      violated: { type: "boolean", enum: [false] },
+                      influence: {
+                        type: "string",
+                        enum: ["none"],
+                      },
+                      summary: { type: "null" },
+                    },
+                    required: ["violated", "influence", "summary"],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      violated: { type: "boolean", enum: [true] },
+                      influence: {
+                        type: "string",
+                        enum: ["supporting", "material"],
+                      },
+                      summary: {
+                        type: "string",
+                        minLength: 1,
+                        maxLength: 500,
+                      },
+                    },
+                    required: ["violated", "influence", "summary"],
+                    additionalProperties: false,
+                  },
+                ]
+              : []),
             ],
           },
         },
-        policyAssessment: {
-          anyOf: [
-            ...(!hasOrganizationPolicy ? [{ type: "null" }] : []),
-            ...(hasOrganizationPolicy ? [{
-              type: "object",
-              properties: {
-                violated: { type: "boolean", enum: [false] },
-                influence: {
-                  type: "string",
-                  enum: ["none"],
-                },
-                summary: { type: "null" },
-              },
-              required: ["violated", "influence", "summary"],
-              additionalProperties: false,
-            },
-            {
-              type: "object",
-              properties: {
-                violated: { type: "boolean", enum: [true] },
-                influence: {
-                  type: "string",
-                  enum: ["supporting", "material"],
-                },
-                summary: {
-                  type: "string",
-                  minLength: 1,
-                  maxLength: 500,
-                },
-              },
-              required: ["violated", "influence", "summary"],
-              additionalProperties: false,
-            }] : []),
-          ],
-        },
+        required: [
+          "trustScore",
+          "verdict",
+          "confidence",
+          "reasoning",
+          "categories",
+          "policyAssessment",
+        ],
+        additionalProperties: false,
       },
-      required: [
-        "trustScore",
-        "verdict",
-        "confidence",
-        "reasoning",
-        "categories",
-        "policyAssessment",
-      ],
-      additionalProperties: false,
     },
-  },
   };
 }
 

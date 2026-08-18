@@ -247,6 +247,7 @@ function scopeContent(scope: AnalysisScope): string {
 interface ScopeSnapshot {
   content: string;
   domains: string[];
+  trustedDomains: string[];
   fingerprint: string;
   linkMismatches: Array<{ text: string; href: string }>;
   phrases: string[];
@@ -259,6 +260,7 @@ function snapshotScope(scope: AnalysisScope): ScopeSnapshot {
   const linkMismatches: ScopeSnapshot["linkMismatches"] = [];
   const fingerprintTokens: string[] = [];
   const riskyDomains = new Set<string>();
+  const trustedDomains = new Set<string>();
   const otherDomains = new Set<string>();
 
   for (const link of links) {
@@ -276,13 +278,19 @@ function snapshotScope(scope: AnalysisScope): ScopeSnapshot {
     if (risk.hostname) {
       if (risk.risky) {
         riskyDomains.add(risk.hostname);
+      } else if (risk.official) {
+        trustedDomains.add(risk.hostname);
       } else {
         otherDomains.add(risk.hostname);
       }
     }
   }
 
-  for (const hostname of [...riskyDomains, ...otherDomains]) {
+  for (const hostname of [
+    ...riskyDomains,
+    ...trustedDomains,
+    ...otherDomains,
+  ]) {
     if (domains.size >= 20) break;
     domains.add(hostname);
   }
@@ -295,6 +303,7 @@ function snapshotScope(scope: AnalysisScope): ScopeSnapshot {
   return {
     content,
     domains: Array.from(domains),
+    trustedDomains: Array.from(trustedDomains).slice(0, 20),
     fingerprint: fingerprintFromLinkTokens(
       scope.messageKey,
       content,
@@ -835,6 +844,7 @@ async function analyzeCandidate(scope: AnalysisScope): Promise<void> {
       snapshot.domains,
       snapshot.phrases,
       snapshot.linkMismatches,
+      snapshot.trustedDomains,
     );
 
     if (!isGuardianActive || generation !== guardianGeneration) return;
@@ -1180,10 +1190,11 @@ async function requestGuardianVerdict(
   domains: string[],
   phrases: string[],
   linkMismatches: Array<{ text: string; href: string }>,
+  trustedDomains: string[],
 ): Promise<AnalyzeResult> {
   const response = (await chrome.runtime.sendMessage({
     type: "GUARDIAN_ANALYZE",
-    payload: { content, domains, phrases, linkMismatches },
+    payload: { content, domains, phrases, linkMismatches, trustedDomains },
   })) as GuardianMessageResponse | undefined;
 
   if (!response) throw new Error("Brak odpowiedzi od Guardiana.");

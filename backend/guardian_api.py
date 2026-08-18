@@ -100,11 +100,12 @@ class GuardianRequest(BaseModel):
 
     content: str = Field(max_length=8_000)
     domains: list[Domain] = Field(default_factory=list, max_length=20)
+    trustedDomains: list[Domain] = Field(default_factory=list, max_length=20)
     phrases: list[Phrase] = Field(default_factory=list, max_length=50)
     linkMismatches: list[LinkMismatch] = Field(default_factory=list, max_length=50)
     organizationPolicy: OrganizationPolicy | None = None
 
-    @field_validator("domains")
+    @field_validator("domains", "trustedDomains")
     @classmethod
     def validate_domains(cls, values: list[str]) -> list[str]:
         normalized: list[str] = []
@@ -171,6 +172,7 @@ def guardian_analyze(request: GuardianRequest) -> GuardianVerdict:
         ),
         "untrusted_payload": untrusted_payload,
         "policy_payload": _policy_payload(request.organizationPolicy),
+        "trusted_domains": ", ".join(request.trustedDomains) or "brak",
     }
 
     try:

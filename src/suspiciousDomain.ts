@@ -586,9 +586,7 @@ function normalizeHostname(value: string): string {
 
     const url = new URL(hasProtocol ? trimmedValue : `https://${trimmedValue}`);
 
-    return url.hostname
-      .toLowerCase()
-      .replace(/\.$/, "");
+    return url.hostname.toLowerCase().replace(/\.$/, "");
   } catch {
     return "";
   }
@@ -738,6 +736,7 @@ export type SuspiciousDomainReason =
 export interface DomainAnalysis {
   hostname: string;
   isSuspicious: boolean;
+  isOfficial: boolean;
   score: number;
   reasons: SuspiciousDomainReason[];
   matchedBrand: string | null;
@@ -777,6 +776,7 @@ function emptyAnalysis(hostname: string): DomainAnalysis {
   return {
     hostname,
     isSuspicious: false,
+    isOfficial: false,
     score: 0,
     reasons: [],
     matchedBrand: null,
@@ -823,8 +823,7 @@ function getPlainRegionalBrand(
   const registrableLabel = normalizeToken(
     parsedHostname.domainWithoutSuffix ?? "",
   );
-  const sourceLabel =
-    parsedHostname.domainWithoutSuffix?.toLowerCase() ?? "";
+  const sourceLabel = parsedHostname.domainWithoutSuffix?.toLowerCase() ?? "";
 
   if (
     !regionalBrandLabels.has(registrableLabel) ||
@@ -913,8 +912,7 @@ function getLabelCandidates(
     );
   }
 
-  const withoutSuspiciousAdditions =
-    removeSuspiciousAdditions(normalizedLabel);
+  const withoutSuspiciousAdditions = removeSuspiciousAdditions(normalizedLabel);
 
   if (withoutSuspiciousAdditions !== normalizedLabel) {
     addCandidate(
@@ -977,15 +975,14 @@ function getLabelCandidates(
   return candidates;
 }
 
-function getDomainCandidates(parsedHostname: ParsedHostname): DomainCandidate[] {
+function getDomainCandidates(
+  parsedHostname: ParsedHostname,
+): DomainCandidate[] {
   const candidates: DomainCandidate[] = [];
 
   if (parsedHostname.domainWithoutSuffix) {
     candidates.push(
-      ...getLabelCandidates(
-        parsedHostname.domainWithoutSuffix,
-        "registrable",
-      ),
+      ...getLabelCandidates(parsedHostname.domainWithoutSuffix, "registrable"),
     );
   }
 
@@ -1054,9 +1051,8 @@ function createEvidence(
   hostname: string,
   fuzzyMatch: boolean,
 ): MatchEvidence {
-  const provenance: DomainMatchProvenance = fuzzyMatch
-    ? "fuzzy"
-    : candidate.provenance;
+  const provenance: DomainMatchProvenance =
+    fuzzyMatch ? "fuzzy" : candidate.provenance;
   const evidence: MatchEvidence = {
     score: 0,
     reasons: [],
@@ -1166,7 +1162,7 @@ export function analyzeDomain(domain: string): DomainAnalysis {
   }
 
   if (isOfficialDomain(hostname, parsedHostname)) {
-    return emptyAnalysis(hostname);
+    return { ...emptyAnalysis(hostname), isOfficial: true };
   }
 
   /*
@@ -1182,6 +1178,7 @@ export function analyzeDomain(domain: string): DomainAnalysis {
     return {
       hostname,
       isSuspicious: false,
+      isOfficial: false,
       score: 1,
       reasons: ["unverified-regional-brand"],
       matchedBrand: plainRegionalBrand,
@@ -1246,6 +1243,7 @@ export function analyzeDomain(domain: string): DomainAnalysis {
   return {
     hostname,
     isSuspicious: bestEvidence.score >= suspiciousScoreThreshold,
+    isOfficial: false,
     score: bestEvidence.score,
     reasons: bestEvidence.reasons,
     matchedBrand: bestEvidence.matchedBrand,
