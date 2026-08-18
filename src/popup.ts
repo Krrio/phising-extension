@@ -90,9 +90,7 @@ function policyErrorMessage(error: unknown): string {
 }
 
 async function initOrganizationPolicy(): Promise<void> {
-  const section = document.querySelector<HTMLElement>(
-    "section[aria-labelledby='organizationPolicyHeading']",
-  );
+  const section = document.getElementById("organizationPolicySection");
   const badge = document.getElementById("organizationPolicyBadge");
   const emptyState = document.getElementById("organizationPolicyEmpty");
   const loadedState = document.getElementById("organizationPolicyLoaded");
@@ -107,9 +105,7 @@ async function initOrganizationPolicy(): Promise<void> {
   const hash = document.getElementById("organizationPolicyHash");
   const preview = document.getElementById("organizationPolicyPreview");
   const errorRegion = document.getElementById("organizationPolicyError");
-  const feedbackRegion = document.getElementById(
-    "organizationPolicyFeedback",
-  );
+  const feedbackRegion = document.getElementById("organizationPolicyFeedback");
 
   if (
     !section ||
@@ -171,8 +167,7 @@ async function initOrganizationPolicy(): Promise<void> {
     hash.textContent = `${policy.contentHash.slice(0, 12)}…`;
     hash.title = policy.contentHash;
 
-    const isTruncated =
-      policy.content.length > POLICY_PREVIEW_CHARACTER_LIMIT;
+    const isTruncated = policy.content.length > POLICY_PREVIEW_CHARACTER_LIMIT;
     preview.textContent =
       policy.content.slice(0, POLICY_PREVIEW_CHARACTER_LIMIT) +
       (isTruncated ? "\n\n[… dalsza część ukryta w podglądzie]" : "");
