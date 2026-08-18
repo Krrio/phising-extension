@@ -12,10 +12,7 @@ import {
   isElementVisible,
   isInsideEditableOrControl,
 } from "./domVisibility";
-import {
-  isExtensionDecoratedLink,
-  isExtensionMark,
-} from "./highlight";
+import { isExtensionDecoratedLink, isExtensionMark } from "./highlight";
 import { getLinkRisk } from "./linkRisk";
 import type { AnalyzeResult, GuardianMessageResponse } from "./messages";
 import {
@@ -98,9 +95,11 @@ function isAnalyzableBlock(
   if (isInsideOwnUi(block)) return false;
   if (isInsideEditableOrControl(block)) return false;
   const visible =
-    guardianHiddenTarget &&
-    guardianHiddenTarget.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN &&
-    (guardianHiddenTarget === block || guardianHiddenTarget.contains(block)) ?
+    (
+      guardianHiddenTarget &&
+      guardianHiddenTarget.getAttribute(HIDDEN_ATTR) === HIDE_TOKEN &&
+      (guardianHiddenTarget === block || guardianHiddenTarget.contains(block))
+    ) ?
       isVisibleWithinRoot(block, guardianHiddenTarget)
     : isElementVisible(block);
   if (!visible) return false;
@@ -165,12 +164,9 @@ function compactHash(value: string): string {
     .join("");
 }
 
-function guardianLinkToken(
-  link: string | GuardianFingerprintLink,
-): string {
+function guardianLinkToken(link: string | GuardianFingerprintLink): string {
   const text =
-    typeof link === "string" ? ""
-    : canonicalizeFingerprintText(link.text);
+    typeof link === "string" ? "" : canonicalizeFingerprintText(link.text);
   const href = typeof link === "string" ? link : link.href;
   return compactHash(`${text}\u0000${href}`);
 }
@@ -321,9 +317,7 @@ function hasLocalRisk(snapshot: ScopeSnapshot): boolean {
 export function guardianRequiresLocalRisk(
   policyRevision: string | null,
 ): boolean {
-  return (
-    policyRevision === null || policyRevision === NO_POLICY_REVISION
-  );
+  return policyRevision === null || policyRevision === NO_POLICY_REVISION;
 }
 
 function collectCandidates(
@@ -659,9 +653,6 @@ function applyGuardianVerdict(
     );
     return;
   }
-
-  // The scan scheduler restores the neutral state. A safe result must not
-  // overwrite a warning produced by another concurrent candidate.
 }
 
 function withoutGuardianHideRule<T>(operation: () => T): T {
@@ -707,8 +698,7 @@ function releaseStaleBlocks(): AnalysisScope[] {
       sameMessageKey: currentScope.messageKey === entry.messageKey,
       canAnalyze: currentScope.canAnalyze,
       canAutoHide: currentScope.canAutoHide,
-      fingerprintMatches:
-        currentSnapshot.fingerprint === entry.fingerprint,
+      fingerprintMatches: currentSnapshot.fingerprint === entry.fingerprint,
     });
     if (reconciliation === "restore") {
       entry.restore();
@@ -860,7 +850,8 @@ async function analyzeCandidate(scope: AnalysisScope): Promise<void> {
     rememberVerdict(snapshot.fingerprint, verdict);
 
     if (!block.isConnected) return;
-    const currentSeed = scope.contentRoot.isConnected ? scope.contentRoot : block;
+    const currentSeed =
+      scope.contentRoot.isConnected ? scope.contentRoot : block;
     const currentScope = resolveAnalysisScope(currentSeed);
     const currentSnapshot = snapshotScope(currentScope);
     const quarantinedTarget = hiddenBlocks.has(block) ? block : null;
@@ -926,13 +917,17 @@ function setGuardianStatus(
       ` · polityka: ${shortPolicyName(organizationPolicyFileName)}`
     : "";
   label.textContent = `${text}${policySuffix}`;
-  panel.title = details;
+  panel.title = details || `${text}${policySuffix}`;
   dot.style.background =
     state === "scanning" ? "#eab308"
     : state === "warning" ? "#f59e0b"
     : state === "error" ? "#dc2626"
     : state === "threat" ? "#dc2626"
     : "#22c55e";
+
+  if (panel.style.width !== "40px") {
+    expandGuardianPanel(true);
+  }
 }
 
 function scheduleGuardianScan(delay = SCAN_THROTTLE_MS): void {
@@ -975,10 +970,7 @@ async function refreshOrganizationPolicyContext(): Promise<void> {
 
   try {
     const policy = await loadOrganizationPolicy();
-    if (
-      loadGeneration !== policyLoadGeneration ||
-      !isGuardianActive
-    ) {
+    if (loadGeneration !== policyLoadGeneration || !isGuardianActive) {
       return;
     }
 
@@ -987,10 +979,7 @@ async function refreshOrganizationPolicyContext(): Promise<void> {
     organizationPolicyRevision = nextRevision;
     organizationPolicyFileName = policy?.fileName ?? null;
 
-    if (
-      previousRevision !== null &&
-      previousRevision !== nextRevision
-    ) {
+    if (previousRevision !== null && previousRevision !== nextRevision) {
       // Policy is part of the security identity. Old cache entries, cooldowns,
       // reveals and in-flight responses cannot cross policy revisions.
       guardianGeneration += 1;
@@ -1054,8 +1043,11 @@ export function startGuardian(): void {
   panel.style.zIndex = "2147483646";
   panel.style.display = "flex";
   panel.style.alignItems = "center";
-  panel.style.gap = "10px";
-  panel.style.padding = "10px 14px";
+  panel.style.gap = "0px";
+  panel.style.height = "40px";
+  panel.style.width = "40px";
+  panel.style.padding = "0";
+  panel.style.overflow = "hidden";
   panel.style.background = "#18181b";
   panel.style.color = "white";
   panel.style.borderRadius = "999px";
@@ -1063,21 +1055,45 @@ export function startGuardian(): void {
   panel.style.fontFamily = "Poppins, sans-serif";
   panel.style.fontSize = "13px";
   panel.style.opacity = "0";
-  panel.style.transition = "opacity 0.3s ease";
+  panel.style.cursor = "default";
+  panel.style.transition =
+    "opacity 0.3s ease, width 0.25s ease, padding 0.25s ease, gap 0.25s ease";
+
+  // kropka — zawsze widoczna, wyśrodkowana w kółku
+  const dotWrapper = document.createElement("span");
+  dotWrapper.style.display = "flex";
+  dotWrapper.style.alignItems = "center";
+  dotWrapper.style.justifyContent = "center";
+  dotWrapper.style.width = "40px";
+  dotWrapper.style.height = "40px";
+  dotWrapper.style.flexShrink = "0";
+  dotWrapper.style.transition = "width 0.25s ease";
 
   const dot = document.createElement("span");
   dot.className = "pg-guardian-dot";
-  dot.style.width = "8px";
-  dot.style.height = "8px";
+  dot.style.width = "10px";
+  dot.style.height = "10px";
   dot.style.borderRadius = "999px";
   dot.style.background = "#22c55e";
   dot.style.flexShrink = "0";
-  panel.appendChild(dot);
+  dotWrapper.appendChild(dot);
+  panel.appendChild(dotWrapper);
+
+  // treść — ukryta dopóki nie najedziesz
+  const content = document.createElement("div");
+  content.className = "pg-guardian-content";
+  content.style.display = "flex";
+  content.style.alignItems = "center";
+  content.style.gap = "10px";
+  content.style.whiteSpace = "nowrap";
+  content.style.opacity = "0";
+  content.style.transition = "opacity 0.2s ease";
+  content.style.paddingRight = "12px";
 
   const label = document.createElement("span");
   label.className = "pg-guardian-label";
   label.textContent = "Guardian wczytuje politykę…";
-  panel.appendChild(label);
+  content.appendChild(label);
 
   const killButton = document.createElement("button");
   killButton.type = "button";
@@ -1085,17 +1101,22 @@ export function startGuardian(): void {
   killButton.style.border = "none";
   killButton.style.borderRadius = "999px";
   killButton.style.padding = "5px 12px";
-  killButton.style.marginLeft = "4px";
   killButton.style.background = "#3f3f46";
   killButton.style.color = "white";
   killButton.style.fontSize = "12px";
   killButton.style.fontWeight = "600";
   killButton.style.cursor = "pointer";
   killButton.style.fontFamily = "Poppins, sans-serif";
+  killButton.style.flexShrink = "0";
   killButton.addEventListener("click", () => {
     void killGuardian();
   });
-  panel.appendChild(killButton);
+  content.appendChild(killButton);
+
+  panel.appendChild(content);
+
+  panel.addEventListener("mouseenter", () => expandGuardianPanel(true));
+  panel.addEventListener("mouseleave", () => expandGuardianPanel(false));
 
   statusPanel = panel;
   document.body.appendChild(panel);
@@ -1103,6 +1124,23 @@ export function startGuardian(): void {
     panel.style.opacity = "1";
   });
   void refreshOrganizationPolicyContext();
+}
+
+function expandGuardianPanel(expanded: boolean): void {
+  const panel = statusPanel;
+  if (!panel) return;
+
+  const content = panel.querySelector<HTMLElement>(".pg-guardian-content");
+  if (!content) return;
+
+  if (expanded) {
+    content.style.opacity = "1";
+    const contentWidth = content.scrollWidth;
+    panel.style.width = `${40 + contentWidth}px`;
+  } else {
+    content.style.opacity = "0";
+    panel.style.width = "40px";
+  }
 }
 
 export function stopGuardian(): void {
