@@ -5,7 +5,7 @@
     <link rel="stylesheet" href="dist/styles.css" />
   </head>
   <body
-    class="flex max-h-[600px] w-72 flex-col overflow-y-auto bg-white p-5 font-poppins text-zinc-900"
+    class="flex max-h-[600px] w-72 max-w-72 flex-col overflow-x-hidden overflow-y-auto bg-white p-5 font-poppins text-zinc-900"
   >
     <header class="mb-8 flex items-center justify-center gap-3">
       <img src="assets/images/logo.svg" alt="Phishing Guard" class="h-8 w-8" />
@@ -108,7 +108,7 @@
             <dt>SHA-256</dt>
             <dd
               id="organizationPolicyHash"
-              class="truncate text-right font-mono"
+              class="min-w-0 truncate text-right font-mono"
             ></dd>
           </dl>
 
@@ -120,7 +120,7 @@
             </summary>
             <pre
               id="organizationPolicyPreview"
-              class="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-zinc-600"
+              class="mt-2 max-h-32 w-full max-w-full overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-4 text-zinc-600"
             ></pre>
           </details>
 
