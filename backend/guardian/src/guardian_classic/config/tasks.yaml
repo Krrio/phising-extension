@@ -39,6 +39,10 @@ analiza_tresci_task:
     Jeśli polityka ma wartość null, nie wymyślaj reguł organizacji. Jeśli jest
     obecna, wskaż tylko konkretne zasady, które wiadomość może naruszać, oraz
     obserwowalne dowody naruszenia.
+    Zasady polityki stosuj wyłącznie do wiadomości mieszczących się w jej
+    zakresie. Jeśli polityka opisuje komunikację konkretnej instytucji,
+    a analizowana wiadomość pochodzi od innego podmiotu, jawnie stwierdź,
+    że polityka nie ma zastosowania, i nie wskazuj naruszeń.
     Zwróć uwagę na: presję czasu, straszenie konsekwencjami, prośby o dane
     logowania lub płatnicze, nakłanianie do kliknięcia, podszywanie się pod
     instytucję.
@@ -80,6 +84,11 @@ synteza_task:
     Pole influence opisuje wyłącznie wpływ NARUSZENIA polityki na werdykt.
     Zgodność z polityką nie jest jej wpływem: nawet gdy polityka pomogła uznać
     wiadomość za bezpieczną, ustaw violated=false, influence=none i summary=null.
+    Zasady polityki organizacji stosuj wyłącznie do wiadomości mieszczących
+    się w jej zakresie. Jeśli polityka opisuje komunikację konkretnej
+    instytucji, a analizowana wiadomość pochodzi od innego podmiotu, ustaw
+    violated=false i oceniaj wyłącznie według zasad ogólnych. Nigdy nie
+    przenoś zakazu z jednej organizacji na komunikację innej.
     Jeśli sygnały sobie przeczą, wyjaśnij, który przeważa i dlaczego.
     Oceń trustScore według skali, gdzie 100 oznacza treść w pełni bezpieczną,
     a 0 jednoznaczny phishing: 90-100 brak oznak ryzyka, 70-89 drobne
@@ -97,11 +106,6 @@ synteza_task:
     80-100 i nie używaj werdyktu "suspicious", chyba że treść prosi o hasło,
     kod jednorazowy, dane karty albo o zalogowanie się przez link inny niż
     oficjalna domena marki.
-    Zasady polityki organizacji stosuj wyłącznie do wiadomości mieszczących
-    się w jej zakresie. Jeśli polityka opisuje komunikację konkretnej
-    instytucji, a analizowana wiadomość pochodzi od innego podmiotu, ustaw
-    violated=false i oceniaj wyłącznie według zasad ogólnych. Nigdy nie
-    przenoś zakazu z jednej organizacji na komunikację innej.
   expected_output: >
     Obiekt z polami: trustScore (0-100), verdict (safe, suspicious lub phishing),
     confidence (0.0-1.0), reasoning (krótkie uzasadnienie po polsku),

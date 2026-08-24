@@ -213,12 +213,24 @@ async function initOrganizationPolicy(): Promise<void> {
     }
   });
 
-  removeButton.addEventListener("click", async () => {
-    const confirmed = window.confirm(
-      "Czy na pewno chcesz usunąć politykę organizacji?",
-    );
-    if (!confirmed) return;
+  let removeArmed = false;
+  let removeTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const disarmRemove = () => {
+    removeArmed = false;
+    clearTimeout(removeTimer);
+    removeButton.textContent = "Usuń";
+  };
+
+  removeButton.addEventListener("click", async () => {
+    if (!removeArmed) {
+      removeArmed = true;
+      removeButton.textContent = "Na pewno?";
+      removeTimer = setTimeout(disarmRemove, 4000);
+      return;
+    }
+
+    disarmRemove();
     setError();
     setBusy(true);
 
@@ -233,14 +245,27 @@ async function initOrganizationPolicy(): Promise<void> {
     }
   });
 
-  removeInvalidButton.addEventListener("click", async () => {
-    const confirmed = window.confirm(
-      "Czy na pewno chcesz usunąć uszkodzony zapis polityki?",
-    );
-    if (!confirmed) return;
+  let removeInvalidArmed = false;
+  let removeInvalidTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const disarmRemoveInvalid = () => {
+    removeInvalidArmed = false;
+    clearTimeout(removeInvalidTimer);
+    removeInvalidButton.textContent = "Usuń uszkodzony zapis";
+  };
+
+  removeInvalidButton.addEventListener("click", async () => {
+    if (!removeInvalidArmed) {
+      removeInvalidArmed = true;
+      removeInvalidButton.textContent = "Na pewno?";
+      removeInvalidTimer = setTimeout(disarmRemoveInvalid, 4000);
+      return;
+    }
+
+    disarmRemoveInvalid();
     setError();
     setBusy(true);
+
     try {
       await removeOrganizationPolicy();
       renderNoPolicy();
