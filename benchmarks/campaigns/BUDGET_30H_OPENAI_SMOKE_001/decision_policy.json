@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "safe_action": "allow",
+  "hide_when": {
+    "verdict": "phishing",
+    "trust_score_lt": 40,
+    "confidence_gte": 0.8
+  },
+  "non_safe_fallback_action": "warn",
+  "technical_failure_action": "allow"
+}

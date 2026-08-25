@@ -55,3 +55,9 @@ Thumbs.db
 *.tmp
 *.temp
 .cache/
+
+# Benchmark outputs and private datasets (only synthetic fixtures are tracked)
+benchmark-runs/
+benchmarks/private-data/
+benchmarks/private-scoring/
+benchmarks/private-runs/

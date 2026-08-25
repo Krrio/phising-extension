@@ -1,0 +1,40 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "analyze_response",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "trustScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "verdict": { "type": "string", "enum": ["safe", "suspicious", "phishing"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reasoning": { "type": "string" },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "credential_request",
+              "urgency",
+              "impersonation",
+              "suspicious_link",
+              "suspicious_domain",
+              "financial"
+            ]
+          }
+        },
+        "policyAssessment": { "anyOf": [{ "type": "null" }] }
+      },
+      "required": [
+        "trustScore",
+        "verdict",
+        "confidence",
+        "reasoning",
+        "categories",
+        "policyAssessment"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
