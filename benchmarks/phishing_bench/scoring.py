@@ -341,6 +341,22 @@ def score_run(
     output_dir: Path | None,
     repo_root: Path,
 ) -> Path:
+    scoring_manifest_path = labels_path.resolve().parent / "scoring_manifest.json"
+    if scoring_manifest_path.is_file():
+        scoring_manifest = read_json(scoring_manifest_path)
+        if (
+            isinstance(scoring_manifest, dict)
+            and scoring_manifest.get("scoring_profile") == "binary_quality_v1"
+        ):
+            from .quality_scoring import score_quality_run
+
+            return score_quality_run(
+                run_dir=run_dir,
+                labels_path=labels_path,
+                output_dir=output_dir,
+                repo_root=repo_root,
+            )
+
     run_dir = run_dir.resolve()
     manifest = read_json(run_dir / "run_manifest.json")
     results = _load_results(run_dir)

@@ -422,6 +422,28 @@ class BenchmarkRunnerTests(unittest.TestCase):
             _output("phishing", 5, 0.99),
         ]
 
+    def test_direct_real_transport_requires_exact_campaign_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            for live_authorized, confirmation in (
+                (False, None),
+                (True, None),
+                (False, "BUDGET_30H_OPENAI_SMOKE_001"),
+            ):
+                with self.subTest(
+                    live_authorized=live_authorized, confirmation=confirmation
+                ):
+                    with self.assertRaisesRegex(
+                        ContractError, "live_authorized=True and exact confirm_campaign"
+                    ):
+                        run_campaign(
+                            config_path=CONFIG_PATH,
+                            repo_root=REPO_ROOT,
+                            output_root=Path(temporary) / "runs",
+                            api_key=FAKE_KEY,
+                            live_authorized=live_authorized,
+                            confirm_campaign=confirmation,
+                        )
+
     def test_full_fake_run_writes_private_auditable_artifacts_and_scores(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output_root = Path(temporary) / "runs"

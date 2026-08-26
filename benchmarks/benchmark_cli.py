@@ -29,21 +29,23 @@ def _path(value: str) -> Path:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="benchmark_cli.py",
-        description="Bezpieczny harness pierwszego OpenAI Direct engineering smoke.",
+        description="Bezpieczny harness OpenAI Direct: smoke oraz syntetyczny pilot jakości.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
     validate = commands.add_parser("validate", help="Waliduje kontrakt i budżet bez wywołań API.")
     validate.add_argument("--campaign", type=_path, default=DEFAULT_CONFIG)
 
-    run = commands.add_parser("run", help="Wykonuje dry-run albo jawnie potwierdzony live smoke.")
+    run = commands.add_parser(
+        "run", help="Wykonuje dry-run albo jawnie potwierdzony live run wybranej kampanii."
+    )
     run.add_argument("--campaign", type=_path, default=DEFAULT_CONFIG)
     run.add_argument("--output-root", type=_path, default=REPO_ROOT / "benchmark-runs")
     run.add_argument("--live", action="store_true", help="Zezwala na płatne outbound API calls.")
     run.add_argument(
         "--store-reasoning",
         action="store_true",
-        help="Opt-in tylko dla syntetycznego smoke; raport nigdy nie renderuje reasoning.",
+        help="Opt-in tylko dla danych syntetycznych; raport nigdy nie renderuje reasoning.",
     )
     run.add_argument(
         "--confirm-campaign",
@@ -88,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
                 output_root=args.output_root,
                 api_key=api_key,
                 store_reasoning=args.store_reasoning,
+                live_authorized=args.live,
+                confirm_campaign=args.confirm_campaign,
             )
             print(f"Run zakończony. Wyniki: {run_dir}")
             return 0

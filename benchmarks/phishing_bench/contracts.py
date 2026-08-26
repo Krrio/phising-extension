@@ -11,6 +11,8 @@ from .io_utils import canonical_json, read_json, read_jsonl, sha256_file, sha256
 
 
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+SMOKE_PROFILE = "openai_direct_smoke_v1"
+QUALITY_PILOT_PROFILE = "openai_direct_quality_pilot_v1"
 CATEGORIES = {
     "credential_request",
     "urgency",
@@ -169,6 +171,15 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "pricing_usd_per_million_tokens",
         "security",
     }
+    evaluation_profile = config.get("evaluation_profile", SMOKE_PROFILE)
+    if evaluation_profile == QUALITY_PILOT_PROFILE:
+        required |= {
+            "evaluation_profile",
+            "expected_sample_count",
+            "dataset_manifest_path",
+        }
+    elif evaluation_profile != SMOKE_PROFILE:
+        raise ContractError(f"unsupported evaluation_profile: {evaluation_profile}")
     if set(config) != required:
         missing = sorted(required - set(config))
         extra = sorted(set(config) - required)
@@ -192,23 +203,87 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         raise ContractError("requested_model must be an exact dated snapshot, never an alias/latest")
     if config["api_key_env"] != "OPENAI_API_KEY":
         raise ContractError("API key must come from OPENAI_API_KEY")
-    if config["temperature"] != 0 or config["concurrency"] != 1:
-        raise ContractError("frozen smoke requires temperature=0 and concurrency=1")
-    if not isinstance(config["max_output_tokens"], int) or not 1 <= config["max_output_tokens"] <= 1000:
+    if (
+        isinstance(config["temperature"], bool)
+        or not isinstance(config["temperature"], (int, float))
+        or config["temperature"] != 0
+        or isinstance(config["concurrency"], bool)
+        or not isinstance(config["concurrency"], int)
+        or config["concurrency"] != 1
+    ):
+        raise ContractError("frozen Direct profiles require temperature=0 and concurrency=1")
+    if (
+        isinstance(config["max_output_tokens"], bool)
+        or not isinstance(config["max_output_tokens"], int)
+        or not 1 <= config["max_output_tokens"] <= 1000
+    ):
         raise ContractError("max_output_tokens must be an integer in 1..1000")
-    if not isinstance(config["request_timeout_seconds"], (int, float)) or not 1 <= config["request_timeout_seconds"] <= 120:
+    if (
+        isinstance(config["request_timeout_seconds"], bool)
+        or not isinstance(config["request_timeout_seconds"], (int, float))
+        or not 1 <= config["request_timeout_seconds"] <= 120
+    ):
         raise ContractError("request timeout must be in 1..120 seconds")
-    if config["max_retries_per_sample"] not in {0, 1}:
-        raise ContractError("smoke allows at most one retry per sample")
+    if (
+        isinstance(config["max_retries_per_sample"], bool)
+        or not isinstance(config["max_retries_per_sample"], int)
+        or config["max_retries_per_sample"] not in {0, 1}
+    ):
+        raise ContractError("Direct profiles allow at most one retry per sample")
+    if evaluation_profile == QUALITY_PILOT_PROFILE:
+        if config["max_retries_per_sample"] != 1:
+            raise ContractError("quality pilot requires exactly one configured retry")
+        if config["request_timeout_seconds"] != 45:
+            raise ContractError("quality pilot requires request_timeout_seconds=45")
     budget = config["budget"]
     if not isinstance(budget, dict) or set(budget) != {"max_attempts", "max_cost_usd", "max_wall_seconds"}:
         raise ContractError("invalid budget contract")
-    if not isinstance(budget["max_attempts"], int) or not 1 <= budget["max_attempts"] <= 10:
-        raise ContractError("smoke max_attempts must be in 1..10")
-    if not isinstance(budget["max_cost_usd"], (int, float)) or not 0 < budget["max_cost_usd"] <= 1:
+    if evaluation_profile == SMOKE_PROFILE:
+        if (
+            isinstance(budget["max_attempts"], bool)
+            or not isinstance(budget["max_attempts"], int)
+            or not 1 <= budget["max_attempts"] <= 10
+        ):
+            raise ContractError("smoke max_attempts must be in 1..10")
+    else:
+        expected_sample_count = config["expected_sample_count"]
+        if (
+            isinstance(expected_sample_count, bool)
+            or not isinstance(expected_sample_count, int)
+            or expected_sample_count != 30
+        ):
+            raise ContractError("quality pilot requires expected_sample_count=30")
+        maximum_attempts = expected_sample_count * (1 + config["max_retries_per_sample"])
+        if (
+            isinstance(budget["max_attempts"], bool)
+            or not isinstance(budget["max_attempts"], int)
+            or budget["max_attempts"] != maximum_attempts
+        ):
+            raise ContractError(
+                "quality pilot max_attempts must equal the frozen per-sample retry ceiling"
+            )
+    if (
+        isinstance(budget["max_cost_usd"], bool)
+        or not isinstance(budget["max_cost_usd"], (int, float))
+        or not 0 < budget["max_cost_usd"] <= 1
+    ):
         raise ContractError("max_cost_usd is required and must be in (0, 1]")
-    if not isinstance(budget["max_wall_seconds"], int) or not 1 <= budget["max_wall_seconds"] <= 1800:
-        raise ContractError("smoke max_wall_seconds must be in 1..1800")
+    if evaluation_profile == SMOKE_PROFILE:
+        if (
+            isinstance(budget["max_wall_seconds"], bool)
+            or not isinstance(budget["max_wall_seconds"], int)
+            or not 1 <= budget["max_wall_seconds"] <= 1800
+        ):
+            raise ContractError("smoke max_wall_seconds must be in 1..1800")
+    else:
+        if float(budget["max_cost_usd"]) != 0.25:
+            raise ContractError("quality pilot requires max_cost_usd=0.25")
+        if (
+            isinstance(budget["max_wall_seconds"], bool)
+            or not isinstance(budget["max_wall_seconds"], int)
+            or budget["max_wall_seconds"] != 7200
+        ):
+            raise ContractError("quality pilot requires max_wall_seconds=7200")
     security = config["security"]
     if security != {
         "store": False,
@@ -217,7 +292,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "data_class": "synthetic_reserved_domains_only",
         "stop_on_critical_event": True,
     }:
-        raise ContractError("security block differs from the frozen synthetic smoke policy")
+        raise ContractError("security block differs from the frozen synthetic Direct policy")
     pricing = config["pricing_usd_per_million_tokens"]
     if not isinstance(pricing, dict) or set(pricing) != {
         "input",
@@ -226,7 +301,9 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "source_checked_at",
         "source",
     } or not all(
-        isinstance(pricing.get(key), (int, float)) and pricing[key] >= 0
+        not isinstance(pricing.get(key), bool)
+        and isinstance(pricing.get(key), (int, float))
+        and pricing[key] >= 0
         for key in ("input", "cached_input", "output")
     ):
         raise ContractError("invalid pricing snapshot")
@@ -244,7 +321,15 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         raise ContractError("pricing differs from the frozen OpenAI snapshot")
 
     resolved: dict[str, Path] = {}
-    for key in ("dataset_path", "prompt_path", "response_schema_path", "decision_policy_path"):
+    asset_path_keys = [
+        "dataset_path",
+        "prompt_path",
+        "response_schema_path",
+        "decision_policy_path",
+    ]
+    if evaluation_profile == QUALITY_PILOT_PROFILE:
+        asset_path_keys.append("dataset_manifest_path")
+    for key in asset_path_keys:
         relative = Path(config[key])
         if relative.is_absolute() or ".." in relative.parts:
             raise ContractError(f"{key} must be a repo-relative path")
@@ -258,6 +343,8 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         resolved[key] = path
     expected_hashes = config["expected_asset_sha256"]
     expected_hash_keys = {"dataset", "prompt", "response_schema", "decision_policy"}
+    if evaluation_profile == QUALITY_PILOT_PROFILE:
+        expected_hash_keys.add("dataset_manifest")
     if not isinstance(expected_hashes, dict) or set(expected_hashes) != expected_hash_keys:
         raise ContractError("expected_asset_sha256 has invalid fields")
     actual_hashes = {
@@ -266,6 +353,10 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "response_schema": sha256_file(resolved["response_schema_path"]),
         "decision_policy": sha256_file(resolved["decision_policy_path"]),
     }
+    if evaluation_profile == QUALITY_PILOT_PROFILE:
+        actual_hashes["dataset_manifest"] = sha256_file(
+            resolved["dataset_manifest_path"]
+        )
     if expected_hashes != actual_hashes:
         changed = sorted(key for key in expected_hash_keys if expected_hashes.get(key) != actual_hashes[key])
         raise ContractError(f"frozen campaign asset hash mismatch: {changed}")
@@ -398,6 +489,55 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
     paths = validate_runtime_config(config, repo_root)
     dataset = read_jsonl(paths["dataset_path"])
     validate_dataset(dataset, require_synthetic=True)
+    evaluation_profile = config.get("evaluation_profile", SMOKE_PROFILE)
+    dataset_manifest: dict[str, Any] | None = None
+    if evaluation_profile == QUALITY_PILOT_PROFILE:
+        expected_sample_count = config["expected_sample_count"]
+        if len(dataset) != expected_sample_count:
+            raise ContractError(
+                f"quality pilot dataset must contain exactly {expected_sample_count} records"
+            )
+        loaded_manifest = read_json(paths["dataset_manifest_path"])
+        if not isinstance(loaded_manifest, dict):
+            raise ContractError("quality pilot dataset manifest must be an object")
+        dataset_manifest = loaded_manifest
+        manifest_keys = {
+            "schema_version",
+            "dataset_id",
+            "sample_count",
+            "source_pool_count",
+            "source_type",
+            "data_class",
+            "signals_mode",
+            "renderer_version",
+            "source_pool_sha256",
+            "selection_manifest_sha256",
+            "generator_sha256",
+        }
+        if set(dataset_manifest) != manifest_keys:
+            raise ContractError("quality pilot dataset manifest fields do not match the contract")
+        assert_no_label_keys(dataset_manifest)
+        if (
+            dataset_manifest["schema_version"] != "1.0"
+            or dataset_manifest["sample_count"] != expected_sample_count
+            or dataset_manifest["source_pool_count"] != 39
+            or dataset_manifest["source_type"] != "synthetic"
+            or dataset_manifest["data_class"]
+            != config["security"]["data_class"]
+            or dataset_manifest["signals_mode"] != "product_derived_v1"
+            or dataset_manifest["renderer_version"] != "visible_text_v1"
+            or dataset_manifest["dataset_id"] != "OPENAI_PILOT_030_V1"
+        ):
+            raise ContractError("quality pilot dataset manifest metadata drift")
+        for hash_key in (
+            "source_pool_sha256",
+            "selection_manifest_sha256",
+            "generator_sha256",
+        ):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(dataset_manifest[hash_key])):
+                raise ContractError(f"invalid dataset manifest hash: {hash_key}")
+        if ".localhost" in canonical_json(dataset).casefold():
+            raise ContractError("quality pilot excludes .localhost fixtures")
     prompt = paths["prompt_path"].read_text(encoding="utf-8").strip()
     if not prompt or len(prompt) > 30_000:
         raise ContractError("prompt must be non-empty and <= 30k chars")
@@ -412,6 +552,7 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
         "prompt": prompt,
         "response_schema": response_schema,
         "decision_policy": decision_policy,
+        "dataset_manifest": dataset_manifest,
         "contract_hash": sha256_json(
             {
                 "config": config,

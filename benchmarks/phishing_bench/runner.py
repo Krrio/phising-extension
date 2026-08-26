@@ -13,6 +13,7 @@ from typing import Any, Callable
 from . import __version__
 from .contracts import (
     ContractError,
+    QUALITY_PILOT_PROFILE,
     action_for_output,
     build_chat_request,
     load_and_validate_campaign,
@@ -82,7 +83,7 @@ def calculate_observed_cost(usage: dict[str, int], pricing: dict[str, Any]) -> f
 
 
 def conservative_attempt_reservation(body: dict[str, Any], config: dict[str, Any]) -> float:
-    # One UTF-8 byte per input token is intentionally conservative for this small text-only smoke.
+    # One UTF-8 byte per input token is intentionally conservative for these small text-only pilots.
     input_proxy = len(canonical_json(body).encode("utf-8"))
     pricing = config["pricing_usd_per_million_tokens"]
     value = (
@@ -135,10 +136,16 @@ def readiness_report(
         )
     max_retries = int(config["max_retries_per_sample"])
     projected_ceiling = round(sum(reservations) * (1 + max_retries), 10)
-    if projected_ceiling > float(config["budget"]["max_cost_usd"]):
+    evaluation_profile = config.get("evaluation_profile", "openai_direct_smoke_v1")
+    required_cost_cap = (
+        round(projected_ceiling * 1.2, 10)
+        if evaluation_profile == QUALITY_PILOT_PROFILE
+        else projected_ceiling
+    )
+    if required_cost_cap > float(config["budget"]["max_cost_usd"]):
         raise ContractError(
             f"configured cost cap ${config['budget']['max_cost_usd']:.4f} is below the "
-            f"conservative smoke reservation ${projected_ceiling:.4f}"
+            f"required campaign reservation ${required_cost_cap:.4f}"
         )
     harness_hashes = _harness_hashes(repo_root)
     report = {
@@ -146,6 +153,7 @@ def readiness_report(
         "checked_at": utc_now(),
         "status": "READY_FOR_MANUAL_LIVE_CONFIRMATION",
         "campaign_id": config["campaign_id"],
+        "evaluation_profile": evaluation_profile,
         "stage": config["stage"],
         "record_count": len(assets["dataset"]),
         "config_id": config["config_id"],
@@ -175,8 +183,18 @@ def readiness_report(
         "budget": config["budget"],
         "reservation_method": "UTF-8 request bytes as input-token proxy plus max output tokens",
         "projected_max_cost_reservation_usd": projected_ceiling,
+        "required_cost_cap_with_margin_usd": required_cost_cap,
         "requests": request_summaries,
     }
+    if "dataset_manifest_path" in paths:
+        report["hashes"]["dataset_manifest_sha256"] = sha256_file(
+            paths["dataset_manifest_path"]
+        )
+        report["dataset_contract"] = {
+            "dataset_id": assets["dataset_manifest"]["dataset_id"],
+            "signals_mode": assets["dataset_manifest"]["signals_mode"],
+            "renderer_version": assets["dataset_manifest"]["renderer_version"],
+        }
     if check_local_tls:
         report["local_tls_preflight"] = tls_trust_summary()
     return report
@@ -346,9 +364,18 @@ def run_campaign(
     transport: Any | None = None,
     sleep: Callable[[float], None] = time.sleep,
     store_reasoning: bool = False,
+    live_authorized: bool = False,
+    confirm_campaign: str | None = None,
 ) -> Path:
     config, assets = load_and_validate_campaign(config_path, repo_root)
     uses_default_transport = transport is None
+    if uses_default_transport and (
+        live_authorized is not True or confirm_campaign != config["campaign_id"]
+    ):
+        raise ContractError(
+            "real transport requires live_authorized=True and exact confirm_campaign="
+            + str(config["campaign_id"])
+        )
     readiness = readiness_report(
         config_path,
         repo_root,

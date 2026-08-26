@@ -1,0 +1,13 @@
+{
+  "data_class": "synthetic_reserved_domains_only",
+  "dataset_id": "OPENAI_PILOT_030_V1",
+  "generator_sha256": "da86bea37587aebcca08558b64e18385fff701ceb9eb61488194741d6e26deed",
+  "renderer_version": "visible_text_v1",
+  "sample_count": 30,
+  "schema_version": "1.0",
+  "selection_manifest_sha256": "6e9a0dd24a5e2c0365852aebeda01136b4b58310a5b7ba2e571fa2e6afb4bce2",
+  "signals_mode": "product_derived_v1",
+  "source_pool_count": 39,
+  "source_pool_sha256": "85680305cc91bf6c8ff4e0e04b37e7dbd508f05681726c4d2fb8e9609f11682c",
+  "source_type": "synthetic"
+}

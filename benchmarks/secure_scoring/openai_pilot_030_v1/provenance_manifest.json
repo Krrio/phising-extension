@@ -1,0 +1,37 @@
+{
+  "annotator_signals_policy": "preserved_in_secure_metadata_but_ignored_for_runner",
+  "canonical_source_path": "benchmarks/datasets/openai_pilot_pool_v1/source.md",
+  "canonical_source_sha256": "85680305cc91bf6c8ff4e0e04b37e7dbd508f05681726c4d2fb8e9609f11682c",
+  "content_link_policy": "visible_text_only; hidden href only in production-derived signals",
+  "content_renderer_version": "visible_text_v1",
+  "data_class": "synthetic_reserved_domains_only",
+  "dataset_version": "EVAL_OPENAI_PILOT_POOL_039_V1",
+  "dependency_versions": {
+    "tldts": "7.4.10",
+    "vite-node": "3.2.4"
+  },
+  "importer_path": "benchmarks/tools/import_openai_pilot_pool.ts",
+  "importer_sha256": "da86bea37587aebcca08558b64e18385fff701ceb9eb61488194741d6e26deed",
+  "outputs_sha256": {
+    "dataset_manifest_json": "8c3497002037989db549adac7f2bac57828652bcab040bb28085a533b807ba29",
+    "labels_jsonl": "124a1696256f2aa6de8793a9dfac94a20798050b119547f2e0a6d2f03e37d26a",
+    "metadata_jsonl": "e7989469dca7975fce76e196dd77e405b68ea3310a52bfe1b6d2fbad0aeb94da",
+    "runner_input_jsonl": "b23f240a0a9372d9414cd623f9717f71172a52952a57a7840bb0b83a23750a6a"
+  },
+  "package_lock_sha256": "da6c666ff572ba75e78b468a7b9849681c0b1836a9d2e4fe1f0515ced6469d9f",
+  "production_source_sha256": {
+    "src/levensthein.ts": "85898c48ea47a09fdf3803e34319883f3d6a004d44cd6ac96b07f8e1d518308c",
+    "src/linkRisk.ts": "d0ac0900f98eb1b62e9fbc8326eebb315a3762bc867be78c1e6ebc82a2c668ce",
+    "src/links.ts": "d764e8717927ce29e4bd3f7613a559ec0ac9d268c8f0798e3027111775ad2cb2",
+    "src/phrases.ts": "6cde99108b1b48cf2c49be0d9c9e8da0b5e4584055d0ce1837f77a28fb2d2f7f",
+    "src/suspiciousDomain.ts": "24869959e884248d1b68388326a6ab9636b7b1f6e4bd41ee6cffab1bca7bbb62"
+  },
+  "schema_version": "1.0",
+  "selection_manifest_sha256": "6e9a0dd24a5e2c0365852aebeda01136b4b58310a5b7ba2e571fa2e6afb4bce2",
+  "signals_mode": "product_derived_v1",
+  "upstream_source_name": "eval_dataset_v3-2.md",
+  "upstream_source_sha256": "2003ba36e13a4ee1f1635b74cc6177e094541478ff5cccefebb368c6c54a6c19",
+  "uuid_name_template": "urn:phishing-extension:dataset:EVAL_OPENAI_PILOT_POOL_039_V1:{case_id}",
+  "uuid_namespace": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+  "uuid_version": 5
+}
