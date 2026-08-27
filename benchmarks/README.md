@@ -14,7 +14,7 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe są dwa tory, każdy ze smoke `n=5` i pilotem jakości `n=30`: OpenAI Direct oraz CrewAI Offline. Direct został już wykonany; CrewAI jest gotowy do pierwszego live smoke.
+Gotowe i wykonane są dwa tory, każdy ze smoke `n=5` i pilotem jakości `n=30`: OpenAI Direct oraz CrewAI Offline. Oba piloty zakończyły się technicznie poprawnie, zostały policzone i mają status `PILOT_HOLD`. Jest też wspólny, całkowicie offline exporter `compare`, który sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
 
 ```text
 5 syntetycznych runner inputs
@@ -42,13 +42,15 @@ osobny prompt bundle + 3 role sekwencyjne × 1 call, bez retry i bez live RDAP/W
 calls.jsonl + 2 frozen tool events na próbkę
         ↓
 system_bundle_delta względem Direct, nie czysta delta frameworka
+        ↓
+compare: runs.csv + cases.csv + pairwise.csv + comparison.json + report.md
 ```
 
 Najważniejsze pliki:
 
 | Plik | Rola |
 |---|---|
-| `benchmark_cli.py` | komendy validate, dry-run, live run i score |
+| `benchmark_cli.py` | komendy validate, dry-run, live run, score i compare |
 | `campaigns/BUDGET_30H_OPENAI_SMOKE_001/runtime_config.json` | zamrożony model, endpoint, retry, timeout, budżet i ceny |
 | `campaigns/BUDGET_30H_OPENAI_SMOKE_001/direct_system_prompt_v1.txt` | kopia obecnego promptu Direct; test wykrywa drift względem produktu |
 | `campaigns/BUDGET_30H_OPENAI_SMOKE_001/response_schema.json` | strict JSON Schema zgodne z bieżącym Direct flow |
@@ -66,9 +68,11 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
+| `phishing_bench/comparison.py` | offline integrity gate i eksport wielu modeli/silników do CSV/JSON/Markdown |
 | `phishing_bench/` | transport, kontrakty, ledger, runner i scorer |
 | `tests/test_benchmark.py` | deterministyczne testy bez API i bez kosztu |
 | `tests/test_crewai_offline.py` | pełny kickoff CrewAI z zamockowaną wyłącznie granicą providera oraz testy telemetrii, egressu i budżetu |
+| `tests/test_comparison.py` | porównania sparowane, wykrywanie manipulacji i bezpieczny eksport CSV |
 
 Tor Direct używa wyłącznie biblioteki standardowej Pythona i nie ma niewidocznych retry SDK. Tor CrewAI działa w przypiętym środowisku backendu (`crewai==1.15.8`), ale wymusza `max_retries=0`, trzy calls na workflow, dokładny Chat Completions endpoint i `store=false`. Oba tory blokują egress poza `api.openai.com`, ignorują proxy, nie pobierają URL-i z wiadomości i odmawiają live runu przy aktywnym `SSLKEYLOGFILE`. CrewAI ma dodatkowo wyłączone anonimowe OTLP telemetry, tracking oraz first-run tracing przed pierwszym importem frameworka.
 
@@ -234,7 +238,7 @@ cat "$RUN_DIR/scoring/report.md"
 
 Nie uruchamiaj ponownie pilota w reakcji na słaby wynik. Najpierw analizuje się `report.md`, `metrics.json` i per-case `scored_results.jsonl`; każda świadoma zmiana promptu, danych lub polityki wymaga nowego campaign ID.
 
-## CrewAI Offline — bieżący następny krok
+## CrewAI Offline — wykonany protokół
 
 To nie jest uruchomienie produkcyjnego `GuardianClassic`. Benchmark buduje świeży, pozbawiony pamięci Crew dla każdej próbki: analityk domen, analityk treści i orkiestrator. Każdy wykonuje dokładnie jeden call do `gpt-4o-mini-2024-07-18`. Domena jest oceniana na podstawie lokalnego, wersjonowanego fixture; live RDAP/WHOIS i narzędzia sieciowe są wyłączone.
 
@@ -291,9 +295,9 @@ cat "$RUN_DIR/scoring/report.md"
 
 Smoke może dopuścić pilot tylko wtedy, gdy ma 5 terminalnych sukcesów, 15 calls w kolejności `domain_analyst → content_analyst → orchestrator`, poprawny strict output, usage dla każdego calla, dwa lokalne tool events na próbkę, zero telemetry/nieautoryzowanego egressu i brak przekroczenia budżetu. Golden mismatch wymaga przeglądu, ale nie jest automatycznie błędem przewodu.
 
-### 3. Pilot CrewAI `n=30` — dopiero po przeglądzie smoke
+### 3. Pilot CrewAI `n=30` — procedura po przeglądzie smoke
 
-Pilot używa dokładnie tych samych 30 runner inputs i labeli co ukończony pilot Direct. Nie uruchamiaj go, dopóki raport smoke i `calls.jsonl` nie potwierdzą zachowania prawdziwego frameworka.
+Pilot używa dokładnie tych samych 30 runner inputs i labeli co ukończony pilot Direct. W wykonanej kampanii został uruchomiony dopiero po sprawdzeniu raportu smoke i `calls.jsonl`; poniższe polecenia dokumentują odtwarzalną procedurę, a nie zachętę do rerunu.
 
 ```bash
 CREW_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/runtime_config.json"
@@ -305,7 +309,29 @@ backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
   --campaign "$CREW_PILOT_CONFIG"
 ```
 
-Po osobnym ręcznym potwierdzeniu limitu projektu i campaign ID właściwy live pilot ma limit 90 calls, 0,25 USD i 2 godziny. Aktualna konserwatywna rezerwacja z marginesem wynosi około 0,1589 USD. Scoring korzysta z `benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl`. Najpierw wróć jednak z raportem smoke; decyzja o pilocie jest osobną bramką.
+Właściwy live pilot miał limit 90 calls, 0,25 USD i 2 godziny; konserwatywna rezerwacja z marginesem wynosiła około 0,1589 USD. Scoring korzysta z `benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl`. Zachowaj istniejący run — nowy campaign ID jest wymagany dla każdego świadomego powtórzenia lub zmiany konfiguracji.
+
+## Porównanie wielu modeli i silników — 0 USD
+
+`compare` nie wykonuje requestów i nie potrzebuje klucza API. Pierwszy `--run` jest baseline. Każdy wariant musi być wcześniej policzony przez `score` na dokładnie tym samym zaufanym bundle labeli. Komenda ponownie sprawdza zamknięte artefakty runu, zgodność datasetu, labeli, decision policy, response schema, per-sample input hash oraz matematykę scoringu.
+
+```bash
+DIRECT_RUN="/absolutna/sciezka/do/direct-pilot"
+CREW_RUN="/absolutna/sciezka/do/crewai-pilot"
+COMPARE_DIR="benchmark-runs/comparisons/OPENAI_DIRECT_VS_CREWAI_PILOT_030_001"
+
+python3 benchmarks/benchmark_cli.py compare \
+  --run "direct=$DIRECT_RUN" \
+  --run "crewai=$CREW_RUN" \
+  --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl \
+  --output-dir "$COMPARE_DIR"
+
+cat "$COMPARE_DIR/report.md"
+```
+
+Wynik bieżącej pary jest opisowy: Direct ma `TP=15, FP=3, TN=12, FN=0`, a CrewAI `TP=15, FP=7, TN=8, FN=0`. CrewAI względem Direct ma `ΔF1=-0,098280`, `ΔFPR=+0,266667`, koszt `×3,056809` i medianę latency `×3,046959`. Sparowane wyniki to: oba poprawne `23`, tylko Direct `4`, tylko CrewAI `0`, oba błędne `3`; exact action agreement `24/30`. To nadal `INCONCLUSIVE`, a nie deklaracja zwycięzcy.
+
+Nie mieszaj dwóch osi eksperymentu. OpenAI, Google, Cohere, Mistral i Anthropic to modele/providerzy. CrewAI jest architekturą orkiestracji, nie kolejnym modelem. Pierwsza macierz cross-provider powinna używać jednego direct calla na mail oraz tego samego promptu, schematu i polityki. CrewAI pozostaje osobnym punktem `architecture=crew`.
 
 ## Co jest mierzone
 
@@ -350,6 +376,19 @@ benchmark-runs/<campaign>__<UTC>__<id>/
 
 Najpierw otwórz `scoring/report.md`, potem `scoring/metrics.json`. Do audytu retry i błędów użyj `attempts.jsonl`; do własnej analizy per wiadomość użyj `results.jsonl` i `scored_results.jsonl`. Dla CrewAI sprawdź także `calls.jsonl` oraz `tool_events.jsonl`. Wszystkie artefakty runu mają uprawnienia katalogu `0700` i plików `0600`.
 
+Porównania trafiają do wskazanego `--output-dir`:
+
+```text
+benchmark-runs/comparisons/<comparison>/
+├── runs.csv          # jeden płaski wiersz na model/silnik
+├── cases.csv         # jeden wiersz na wariant × próbkę, format long/tidy
+├── pairwise.csv      # zgodność, delty, koszt i latency dla każdej pary
+├── comparison.json   # pełny eksport maszynowy i hashe źródeł
+└── report.md         # krótka interpretacja bez rankingu
+```
+
+Do wykresu jakości/kosztu/latency użyj `runs.csv`. Do heatmap błędów według `scenario`, `difficulty` lub `class_label` użyj `cases.csv`. Pliki nie zawierają surowej treści wiadomości, promptów ani reasoning.
+
 Statusy końcowe:
 
 - `READINESS_PASS` — przewód, schema, action mapping i pięć golden actions przeszły;
@@ -363,13 +402,15 @@ Statusy końcowe:
 
 ## Zaktualizowana kolejność dalszych prac
 
-1. Direct smoke i pilot `n=30` są ukończone. Zachować oba runy; pilot ma `PILOT_HOLD` przez jeden benign `hide`, więc wynik wymaga analizy i pozostaje `INCONCLUSIVE`.
-2. Utwardzony CrewAI Offline, frozen evidence, call ledger, scoring i testy są zaimplementowane. Produkcyjny Crew pozostaje niezmieniony.
-3. Pełne testy, readiness i dry-run kampanii `CREWAI_OFFLINE_SMOKE_001` są ukończone: runtime nie wykonał żadnego provider calla, a telemetria, proxy, model, `store`, retry i rezerwacja przeszły kontrolę.
-4. Następny krok: commit/push zamrożonych zmian, sprawdzenie limitu projektu u providera i dokładnie jeden CrewAI live smoke `n=5`.
-5. Wykonać scoring, przejrzeć `report.md`, `calls.jsonl` i `tool_events.jsonl`. Przy błędzie nie wykonywać automatycznego rerunu.
-6. Tylko po pozytywnym przeglądzie smoke wykonać jeden CrewAI pilot `n=30` na tym samym zestawie. Delta Direct–Crew ma nazwę `system_bundle_delta`, bo Crew dostaje osobny prompt bundle, dodatkową orkiestrację i evidence.
-7. Dopiero po przejściu pilotów zaplanować budżetowy selection i oddzielny blind confirmation. Przy jednym modelu status może być najwyżej screeningowy; bez baseline/challengera nie wolno użyć `PROVISIONAL_BEST_FOR_FOLLOWUP`.
+1. Direct i CrewAI Offline smoke oraz pilot `n=30` są ukończone. Zachować runy bez rerunów. Oba są technicznie poprawne, oba mają `PILOT_HOLD`, a porównanie pozostaje `INCONCLUSIVE`.
+2. Wygenerować i archiwizować wspólny eksport `compare`. Bieżący Direct–CrewAI jest `system_bundle_delta`, ponieważ różnią się prompt, orkiestracja i frozen evidence.
+3. Następny challenger na istniejącym koncie OpenAI powinien być osobnym Direct profile z przypiętym modelem klasyfikacyjnym, jednym callem, reasoning wyłączonym i tym samym promptem/schematem/policy. Wymaga osobnego smoke `n=5` przed pilotem `n=30`; nie wolno tylko podmienić modelu w zamkniętej kampanii.
+4. Następnie dodać maksymalnie 2–3 tanie direct adapters innych providerów. Kolejność budżetowa do ponownej weryfikacji tuż przed zamrożeniem kampanii: Cohere `command-r7b-12-2024`, Google `gemini-2.5-flash-lite`, Mistral `mistral-small-2603`; Anthropic Haiku jest opcjonalnym droższym punktem referencyjnym.
+5. Screening: jeden smoke `n=5`, a po przejściu bramki jeden pilot `n=30` na provider. Nie uruchamiać CrewAI dla każdego modelu — zaciera to koszt i wpływ samego silnika.
+6. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
+7. `n=30` służy do screeningu i debugowania, `n=100` do ostrożnego confirmation. Żaden wynik syntetyczny sam w sobie nie dowodzi gotowości produkcyjnej; później potrzebny jest osobny, zanonimizowany i zgodnie dopuszczony zestaw z rzeczywistego rozkładu ruchu.
+
+Przy limicie 30 godzin rozsądny zakres to: istniejące 2 piloty zachować, dodać 2–3 challengery po `5+30` próbek, a następnie wykonać `2 × 100` blind confirmation tylko dla finalistów. To daje informację o wielu silnikach bez marnowania budżetu na 100–200 maili dla każdego słabego wariantu.
 
 W blind confirmation hash scoring bundle musi zostać prerejestrowany w zaufanym miejscu przed pierwszym call, niezależnie od repo i operatora runnera. Sąsiedni `scoring_manifest.json` wystarcza do jawnych syntetycznych pilotów, ale nie jest granicą bezpieczeństwa dla ukrytych labeli.
 
@@ -378,8 +419,13 @@ Budowa harnessu, danych i anotacji jest przygotowaniem przed startem 30-godzinne
 ## Źródła wersji i ceny
 
 - OpenAI, [GPT-4o mini — snapshot, endpoints, Structured Outputs i cena](https://developers.openai.com/api/docs/models/gpt-4o-mini)
+- OpenAI, [GPT-5.4 nano — snapshot, Structured Outputs i cena](https://developers.openai.com/api/docs/models/gpt-5.4-nano)
+- OpenAI, [praktyki projektowania evali](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
 - OpenAI, [Chat Completions API](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions)
 - OpenAI, [kontrola danych API](https://developers.openai.com/api/docs/guides/your-data)
+- Cohere, [Command R7B](https://docs.cohere.com/docs/command-r7b) i [Structured Outputs](https://docs.cohere.com/v2/docs/structured-outputs)
+- Google, [Gemini 2.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite), [ceny](https://ai.google.dev/gemini-api/docs/pricing) i [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output)
+- Mistral, [Mistral Small 4](https://docs.mistral.ai/models/mistral-small-4-0-26-03) i [Structured Outputs](https://docs.mistral.ai/studio/conversations/structured-output/custom)
 - CrewAI, [Agents 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/agents), [Tasks 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/tasks), [Crews 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/crews) i [LLMs 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/llms)
 - CrewAI, [changelog](https://docs.crewai.com/en/changelog)
 

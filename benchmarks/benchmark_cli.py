@@ -11,6 +11,7 @@ from phishing_bench.contracts import (
     ContractError,
     load_and_validate_campaign,
 )
+from phishing_bench.comparison import compare_runs, parse_named_run
 from phishing_bench.runner import api_key_from_environment, readiness_report, run_campaign
 from phishing_bench.scoring import score_run
 
@@ -63,6 +64,22 @@ def _parser() -> argparse.ArgumentParser:
     score.add_argument("--run-dir", type=_path, required=True)
     score.add_argument("--labels", type=_path, required=True)
     score.add_argument("--output-dir", type=_path)
+
+    compare = commands.add_parser(
+        "compare",
+        help="Porównuje offline co najmniej dwa scored quality runy i eksportuje dane do wykresów.",
+    )
+    compare.add_argument(
+        "--run",
+        dest="named_runs",
+        action="append",
+        type=parse_named_run,
+        required=True,
+        metavar="NAZWA=RUN_DIR",
+        help="Powtarzalny wariant; pierwszy jest baseline.",
+    )
+    compare.add_argument("--labels", type=_path, required=True)
+    compare.add_argument("--output-dir", type=_path, required=True)
     return parser
 
 
@@ -144,6 +161,16 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root=REPO_ROOT,
             )
             print(f"Scoring i raport: {output_dir}")
+            return 0
+
+        if args.command == "compare":
+            output_dir = compare_runs(
+                named_run_dirs=args.named_runs,
+                labels_path=args.labels,
+                output_dir=args.output_dir,
+                repo_root=REPO_ROOT,
+            )
+            print(f"Porównanie i dane do wykresów: {output_dir}")
             return 0
 
         raise AssertionError("unreachable command")
