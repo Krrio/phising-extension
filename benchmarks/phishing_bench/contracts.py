@@ -13,6 +13,10 @@ from .io_utils import canonical_json, read_json, read_jsonl, sha256_file, sha256
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 SMOKE_PROFILE = "openai_direct_smoke_v1"
 QUALITY_PILOT_PROFILE = "openai_direct_quality_pilot_v1"
+CREWAI_SMOKE_PROFILE = "crewai_offline_smoke_v1"
+CREWAI_QUALITY_PILOT_PROFILE = "crewai_offline_quality_pilot_v1"
+QUALITY_PROFILES = {QUALITY_PILOT_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
+CREWAI_PROFILES = {CREWAI_SMOKE_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
 CATEGORIES = {
     "credential_request",
     "urgency",
@@ -172,14 +176,26 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "security",
     }
     evaluation_profile = config.get("evaluation_profile", SMOKE_PROFILE)
-    if evaluation_profile == QUALITY_PILOT_PROFILE:
+    is_crewai = evaluation_profile in CREWAI_PROFILES
+    is_quality = evaluation_profile in QUALITY_PROFILES
+    if is_quality:
         required |= {
             "evaluation_profile",
             "expected_sample_count",
             "dataset_manifest_path",
         }
+    elif evaluation_profile == CREWAI_SMOKE_PROFILE:
+        required |= {"evaluation_profile", "expected_sample_count"}
     elif evaluation_profile != SMOKE_PROFILE:
         raise ContractError(f"unsupported evaluation_profile: {evaluation_profile}")
+    if is_crewai:
+        required |= {
+            "crewai_version",
+            "crew_profile_path",
+            "frozen_domain_evidence_path",
+            "framework_config",
+            "system_bundle_delta",
+        }
     if set(config) != required:
         missing = sorted(required - set(config))
         extra = sorted(set(config) - required)
@@ -187,8 +203,9 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     assert_no_label_keys(config)
     if config["schema_version"] != "1.0" or config["stage"] != "ENGINEERING_PILOT":
         raise ContractError("unsupported runtime config version or stage")
-    if config["provider"] != "openai" or config["adapter"] != "chat_completions":
-        raise ContractError("the first-stage runner supports only OpenAI Chat Completions")
+    expected_adapter = "crewai_sequential_offline" if is_crewai else "chat_completions"
+    if config["provider"] != "openai" or config["adapter"] != expected_adapter:
+        raise ContractError("provider/adapter differs from the frozen evaluation profile")
     if config["endpoint"] != OPENAI_CHAT_COMPLETIONS_ENDPOINT:
         raise ContractError("endpoint is not the pinned OpenAI Chat Completions endpoint")
     parsed_endpoint = urlparse(config["endpoint"])
@@ -211,7 +228,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         or not isinstance(config["concurrency"], int)
         or config["concurrency"] != 1
     ):
-        raise ContractError("frozen Direct profiles require temperature=0 and concurrency=1")
+        raise ContractError("frozen profiles require temperature=0 and concurrency=1")
     if (
         isinstance(config["max_output_tokens"], bool)
         or not isinstance(config["max_output_tokens"], int)
@@ -224,17 +241,60 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         or not 1 <= config["request_timeout_seconds"] <= 120
     ):
         raise ContractError("request timeout must be in 1..120 seconds")
-    if (
-        isinstance(config["max_retries_per_sample"], bool)
-        or not isinstance(config["max_retries_per_sample"], int)
-        or config["max_retries_per_sample"] not in {0, 1}
+    if isinstance(config["max_retries_per_sample"], bool) or not isinstance(
+        config["max_retries_per_sample"], int
     ):
+        raise ContractError("max_retries_per_sample must be an integer")
+    if is_crewai:
+        if config["max_retries_per_sample"] != 0:
+            raise ContractError("CrewAI Offline forbids workflow retries")
+        expected_framework = {
+            "process": "sequential",
+            "agent_count": 3,
+            "task_count": 3,
+            "max_llm_calls_per_sample": 3,
+            "max_iter": 1,
+            "agent_max_retry_limit": 0,
+            "task_guardrail_max_retries": 0,
+            "provider_max_retries": 0,
+            "memory": False,
+            "cache": False,
+            "planning": False,
+            "delegation": False,
+            "reasoning_planner": False,
+            "respect_context_window": False,
+            "tracing": False,
+            "anonymous_telemetry": False,
+            "first_run_trace_collection": False,
+            "task_output_storage": "ephemeral_in_memory",
+        }
+        if config["crewai_version"] != "1.15.8":
+            raise ContractError("CrewAI Offline requires the frozen CrewAI 1.15.8")
+        if config["framework_config"] != expected_framework:
+            raise ContractError("CrewAI framework_config drift")
+        if config["system_bundle_delta"] != {
+            "comparison_name": "system_bundle_delta",
+            "same_model_snapshot": True,
+            "same_runner_dataset": True,
+            "same_response_schema": True,
+            "same_decision_policy": True,
+            "same_prompt": False,
+            "additional_components": [
+                "benchmark_specific_role_and_task_prompts",
+                "three_role_sequential_orchestration",
+                "frozen_reserved_domain_evidence",
+            ],
+        }:
+            raise ContractError("CrewAI system_bundle_delta disclosure drift")
+    elif config["max_retries_per_sample"] not in {0, 1}:
         raise ContractError("Direct profiles allow at most one retry per sample")
     if evaluation_profile == QUALITY_PILOT_PROFILE:
         if config["max_retries_per_sample"] != 1:
             raise ContractError("quality pilot requires exactly one configured retry")
         if config["request_timeout_seconds"] != 45:
             raise ContractError("quality pilot requires request_timeout_seconds=45")
+    if is_crewai and config["request_timeout_seconds"] != 45:
+        raise ContractError("CrewAI Offline requires request_timeout_seconds=45")
     budget = config["budget"]
     if not isinstance(budget, dict) or set(budget) != {"max_attempts", "max_cost_usd", "max_wall_seconds"}:
         raise ContractError("invalid budget contract")
@@ -245,7 +305,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             or not 1 <= budget["max_attempts"] <= 10
         ):
             raise ContractError("smoke max_attempts must be in 1..10")
-    else:
+    elif is_quality:
         expected_sample_count = config["expected_sample_count"]
         if (
             isinstance(expected_sample_count, bool)
@@ -253,28 +313,40 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             or expected_sample_count != 30
         ):
             raise ContractError("quality pilot requires expected_sample_count=30")
-        maximum_attempts = expected_sample_count * (1 + config["max_retries_per_sample"])
+        calls_per_sample = (
+            config["framework_config"]["max_llm_calls_per_sample"]
+            if is_crewai
+            else 1 + config["max_retries_per_sample"]
+        )
+        maximum_attempts = expected_sample_count * calls_per_sample
         if (
             isinstance(budget["max_attempts"], bool)
             or not isinstance(budget["max_attempts"], int)
             or budget["max_attempts"] != maximum_attempts
         ):
             raise ContractError(
-                "quality pilot max_attempts must equal the frozen per-sample retry ceiling"
+                "quality pilot max_attempts must equal the frozen call ceiling"
             )
+    else:
+        if config["expected_sample_count"] != 5:
+            raise ContractError("CrewAI smoke requires expected_sample_count=5")
+        if config["budget"]["max_attempts"] != 15:
+            raise ContractError("CrewAI smoke requires max_attempts=15")
     if (
         isinstance(budget["max_cost_usd"], bool)
         or not isinstance(budget["max_cost_usd"], (int, float))
         or not 0 < budget["max_cost_usd"] <= 1
     ):
         raise ContractError("max_cost_usd is required and must be in (0, 1]")
-    if evaluation_profile == SMOKE_PROFILE:
+    if evaluation_profile in {SMOKE_PROFILE, CREWAI_SMOKE_PROFILE}:
         if (
             isinstance(budget["max_wall_seconds"], bool)
             or not isinstance(budget["max_wall_seconds"], int)
             or not 1 <= budget["max_wall_seconds"] <= 1800
         ):
             raise ContractError("smoke max_wall_seconds must be in 1..1800")
+        if is_crewai and float(budget["max_cost_usd"]) != 0.05:
+            raise ContractError("CrewAI smoke requires max_cost_usd=0.05")
     else:
         if float(budget["max_cost_usd"]) != 0.25:
             raise ContractError("quality pilot requires max_cost_usd=0.25")
@@ -285,14 +357,31 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         ):
             raise ContractError("quality pilot requires max_wall_seconds=7200")
     security = config["security"]
-    if security != {
-        "store": False,
-        "tools_enabled": False,
-        "external_processing_allowed": True,
-        "data_class": "synthetic_reserved_domains_only",
-        "stop_on_critical_event": True,
-    }:
-        raise ContractError("security block differs from the frozen synthetic Direct policy")
+    expected_security = (
+        {
+            "store": False,
+            "tools_enabled": True,
+            "tool_mode": "runner_precomputed_frozen_evidence_only",
+            "live_domain_network": False,
+            "provider_egress": "api.openai.com_only",
+            "crewai_anonymous_telemetry": False,
+            "crewai_first_run_tracing": False,
+            "crewai_task_output_persistence": False,
+            "external_processing_allowed": True,
+            "data_class": "synthetic_reserved_domains_only",
+            "stop_on_critical_event": True,
+        }
+        if is_crewai
+        else {
+            "store": False,
+            "tools_enabled": False,
+            "external_processing_allowed": True,
+            "data_class": "synthetic_reserved_domains_only",
+            "stop_on_critical_event": True,
+        }
+    )
+    if security != expected_security:
+        raise ContractError("security block differs from the frozen profile")
     pricing = config["pricing_usd_per_million_tokens"]
     if not isinstance(pricing, dict) or set(pricing) != {
         "input",
@@ -327,8 +416,10 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "response_schema_path",
         "decision_policy_path",
     ]
-    if evaluation_profile == QUALITY_PILOT_PROFILE:
+    if is_quality:
         asset_path_keys.append("dataset_manifest_path")
+    if is_crewai:
+        asset_path_keys.extend(["crew_profile_path", "frozen_domain_evidence_path"])
     for key in asset_path_keys:
         relative = Path(config[key])
         if relative.is_absolute() or ".." in relative.parts:
@@ -343,8 +434,10 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         resolved[key] = path
     expected_hashes = config["expected_asset_sha256"]
     expected_hash_keys = {"dataset", "prompt", "response_schema", "decision_policy"}
-    if evaluation_profile == QUALITY_PILOT_PROFILE:
+    if is_quality:
         expected_hash_keys.add("dataset_manifest")
+    if is_crewai:
+        expected_hash_keys.update({"crew_profile", "frozen_domain_evidence"})
     if not isinstance(expected_hashes, dict) or set(expected_hashes) != expected_hash_keys:
         raise ContractError("expected_asset_sha256 has invalid fields")
     actual_hashes = {
@@ -353,9 +446,14 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         "response_schema": sha256_file(resolved["response_schema_path"]),
         "decision_policy": sha256_file(resolved["decision_policy_path"]),
     }
-    if evaluation_profile == QUALITY_PILOT_PROFILE:
+    if is_quality:
         actual_hashes["dataset_manifest"] = sha256_file(
             resolved["dataset_manifest_path"]
+        )
+    if is_crewai:
+        actual_hashes["crew_profile"] = sha256_file(resolved["crew_profile_path"])
+        actual_hashes["frozen_domain_evidence"] = sha256_file(
+            resolved["frozen_domain_evidence_path"]
         )
     if expected_hashes != actual_hashes:
         changed = sorted(key for key in expected_hash_keys if expected_hashes.get(key) != actual_hashes[key])
@@ -393,6 +491,33 @@ def build_chat_request(
     }
     validate_outgoing_request(config, body)
     return body
+
+
+def build_crewai_workflow_contract(
+    config: dict[str, Any],
+    record: dict[str, Any],
+    prompt: str,
+    crew_profile: dict[str, Any],
+    frozen_domain_evidence: dict[str, Any],
+    response_schema: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a hashable, label-free contract for one three-call Crew workflow."""
+
+    workflow = {
+        "adapter": config["adapter"],
+        "model": config["requested_model"],
+        "temperature": config["temperature"],
+        "max_output_tokens": config["max_output_tokens"],
+        "store": False,
+        "framework_config": config["framework_config"],
+        "system_prompt": prompt,
+        "crew_profile": crew_profile,
+        "frozen_domain_evidence_profile": frozen_domain_evidence,
+        "response_format": response_schema,
+        "record": record,
+    }
+    assert_no_label_keys(workflow)
+    return workflow
 
 
 def validate_outgoing_request(config: dict[str, Any], body: dict[str, Any]) -> None:
@@ -490,8 +615,10 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
     dataset = read_jsonl(paths["dataset_path"])
     validate_dataset(dataset, require_synthetic=True)
     evaluation_profile = config.get("evaluation_profile", SMOKE_PROFILE)
+    is_quality = evaluation_profile in QUALITY_PROFILES
+    is_crewai = evaluation_profile in CREWAI_PROFILES
     dataset_manifest: dict[str, Any] | None = None
-    if evaluation_profile == QUALITY_PILOT_PROFILE:
+    if is_quality:
         expected_sample_count = config["expected_sample_count"]
         if len(dataset) != expected_sample_count:
             raise ContractError(
@@ -544,8 +671,62 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
     response_schema = read_json(paths["response_schema_path"])
     decision_policy = read_json(paths["decision_policy_path"])
     validate_decision_policy(decision_policy)
-    for record in dataset:
-        build_chat_request(config, record, prompt, response_schema)
+    crew_profile: dict[str, Any] | None = None
+    frozen_domain_evidence: dict[str, Any] | None = None
+    if is_crewai:
+        loaded_crew_profile = read_json(paths["crew_profile_path"])
+        loaded_evidence = read_json(paths["frozen_domain_evidence_path"])
+        if not isinstance(loaded_crew_profile, dict) or not isinstance(loaded_evidence, dict):
+            raise ContractError("CrewAI profile and frozen evidence must be JSON objects")
+        assert_no_label_keys(loaded_crew_profile)
+        assert_no_label_keys(loaded_evidence)
+        if set(loaded_crew_profile) != {
+            "schema_version",
+            "profile_id",
+            "agents",
+            "tasks",
+            "execution_contract",
+        }:
+            raise ContractError("CrewAI profile fields do not match the frozen contract")
+        if (
+            loaded_crew_profile["schema_version"] != "1.0"
+            or loaded_crew_profile["profile_id"] != "guardian_crewai_offline_v1"
+            or loaded_crew_profile["execution_contract"] != config["framework_config"]
+            or tuple(loaded_crew_profile["agents"])
+            != ("domain_analyst", "content_analyst", "orchestrator")
+            or tuple(loaded_crew_profile["tasks"])
+            != ("domain_analysis", "content_analysis", "synthesis")
+        ):
+            raise ContractError("CrewAI profile metadata/order drift")
+        expected_evidence = {
+            "schema_version": "1.0",
+            "fixture_id": "reserved_domains_offline_v1",
+            "as_of": "2026-08-26T00:00:00Z",
+            "source_mode": "runner_input_signals_plus_reserved_domain_policy",
+            "reserved_suffixes": [".example", ".invalid", ".test", ".localhost"],
+            "registration_status": "not_applicable_reserved_tld",
+            "registration_source": "frozen_reserved_domain_policy",
+            "network_fallback": False,
+            "live_rdap": False,
+            "live_whois": False,
+            "render_version": "frozen_domain_evidence_render_v1",
+        }
+        if loaded_evidence != expected_evidence:
+            raise ContractError("frozen domain evidence profile drift")
+        crew_profile = loaded_crew_profile
+        frozen_domain_evidence = loaded_evidence
+        for record in dataset:
+            build_crewai_workflow_contract(
+                config,
+                record,
+                prompt,
+                crew_profile,
+                frozen_domain_evidence,
+                response_schema,
+            )
+    else:
+        for record in dataset:
+            build_chat_request(config, record, prompt, response_schema)
     assets = {
         "paths": paths,
         "dataset": dataset,
@@ -553,12 +734,16 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
         "response_schema": response_schema,
         "decision_policy": decision_policy,
         "dataset_manifest": dataset_manifest,
+        "crew_profile": crew_profile,
+        "frozen_domain_evidence": frozen_domain_evidence,
         "contract_hash": sha256_json(
             {
                 "config": config,
                 "prompt": prompt,
                 "response_schema": response_schema,
                 "decision_policy": decision_policy,
+                "crew_profile": crew_profile,
+                "frozen_domain_evidence": frozen_domain_evidence,
             }
         ),
     }

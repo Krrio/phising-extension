@@ -10,6 +10,8 @@ from typing import Any
 
 from .contracts import (
     ACTIONS,
+    CREWAI_QUALITY_PILOT_PROFILE,
+    QUALITY_PROFILES,
     QUALITY_PILOT_PROFILE,
     VERDICTS,
     ContractError,
@@ -156,22 +158,38 @@ def _validate_quality_run_profile(
         and required_reservation == round(float(projected_reservation) * 1.2, 10)
         and required_reservation <= float(runtime_config["budget"]["max_cost_usd"])
     )
-    expected_security_contract = {
-        "store": False,
-        "tools": "absent",
-        "conversation": "absent",
-        "background": "absent",
-        "runtime_config_exposes_scoring_path": False,
-        "input_data_class": runtime_config["security"]["data_class"],
-    }
+    if runtime_config.get("evaluation_profile") == CREWAI_QUALITY_PILOT_PROFILE:
+        expected_security_contract = {
+            "store": False,
+            "tools": "runner_precomputed_frozen_evidence_only",
+            "live_domain_network": False,
+            "provider_egress": "api.openai.com_only",
+            "conversation": "fresh_crew_per_sample",
+            "background": "absent",
+            "crewai_anonymous_telemetry": False,
+            "crewai_first_run_tracing": False,
+            "crewai_task_output_persistence": False,
+            "model_observation": "configured_request_model_via_crewai_event",
+            "runtime_config_exposes_scoring_path": False,
+            "input_data_class": runtime_config["security"]["data_class"],
+        }
+    else:
+        expected_security_contract = {
+            "store": False,
+            "tools": "absent",
+            "conversation": "absent",
+            "background": "absent",
+            "runtime_config_exposes_scoring_path": False,
+            "input_data_class": runtime_config["security"]["data_class"],
+        }
     if (
-        runtime_config.get("evaluation_profile") != QUALITY_PILOT_PROFILE
+        runtime_config.get("evaluation_profile") not in QUALITY_PROFILES
         or runtime_config.get("expected_sample_count") != QUALITY_SAMPLE_COUNT
         or manifest.get("campaign_id") != runtime_config.get("campaign_id")
         or manifest.get("stage") != runtime_config.get("stage")
         or readiness.get("status") != "READY_FOR_MANUAL_LIVE_CONFIRMATION"
         or readiness.get("campaign_id") != runtime_config.get("campaign_id")
-        or readiness.get("evaluation_profile") != QUALITY_PILOT_PROFILE
+        or readiness.get("evaluation_profile") != runtime_config.get("evaluation_profile")
         or readiness.get("record_count") != QUALITY_SAMPLE_COUNT
         or readiness.get("config_id") != runtime_config.get("config_id")
         or readiness.get("requested_model") != runtime_config.get("requested_model")
@@ -211,14 +229,23 @@ def _validate_scoring_bundle(
     expected_manifest = {
         "schema_version": "1.0",
         "scoring_profile": QUALITY_SCORING_PROFILE,
-        "campaign_id": manifest.get("campaign_id"),
         "sample_count": len(labels),
         "runner_dataset_sha256": manifest.get("readiness", {}).get("hashes", {}).get(
             "dataset_sha256"
         ),
         "labels_sha256": sha256_file(labels_path),
     }
-    if scoring_manifest != expected_manifest:
+    campaign_compatible = bool(
+        scoring_manifest.get("campaign_id") == manifest.get("campaign_id")
+        or manifest.get("campaign_id")
+        in scoring_manifest.get("compatible_campaign_ids", [])
+    )
+    comparable_fields = {
+        key: value
+        for key, value in scoring_manifest.items()
+        if key not in {"campaign_id", "compatible_campaign_ids"}
+    }
+    if not campaign_compatible or comparable_fields != expected_manifest:
         raise ContractError(
             "scoring_manifest.json does not freeze this binary quality dataset/label bundle"
         )
@@ -458,8 +485,17 @@ def score_quality_run(
     )
     technical_failure_count = sum(technical_statuses.values())
     attempts = sum(int(result.get("outbound_attempts", 0)) for result in results)
-    retry_attempts = sum(
-        max(int(result.get("outbound_attempts", 0)) - 1, 0) for result in results
+    is_crewai = (
+        manifest.get("runtime_config", {}).get("adapter")
+        == "crewai_sequential_offline"
+    )
+    retry_attempts = (
+        0
+        if is_crewai
+        else sum(
+            max(int(result.get("outbound_attempts", 0)) - 1, 0)
+            for result in results
+        )
     )
     observed_cost = round(
         sum(float(result.get("observed_cost_usd", 0)) for result in results), 10
@@ -600,6 +636,12 @@ def score_quality_run(
         "stage": "ENGINEERING_PILOT",
         "campaign_status": campaign_status,
         "comparative_conclusion": "INCONCLUSIVE",
+        "evaluation_track": "crewai_offline" if is_crewai else "openai_direct",
+        "comparison_scope": (
+            manifest.get("runtime_config", {}).get("system_bundle_delta")
+            if is_crewai
+            else None
+        ),
         "disclaimer": (
             "Pilot n=30 używa wyłącznie danych syntetycznych i challenge-enriched. "
             "Metryki są opisowe; nie dowodzą gotowości produkcyjnej, jakości na ruchu "
@@ -676,6 +718,8 @@ def score_quality_run(
             "outbound": attempts,
             "retries": retry_attempts,
             "cost_unknown_attempts": cost_unknown_attempts,
+            "semantics": "llm_calls" if is_crewai else "direct_provider_attempts",
+            "workflows": len(results) if is_crewai else attempts - retry_attempts,
         },
         "usage": token_totals,
         "cost": {
@@ -739,7 +783,21 @@ def score_quality_run(
     status_summary = ", ".join(
         f"{status}={count}" for status, count in sorted(status_counts.items())
     ) or "brak"
-    report = f"""# Raport pilota jakości phishing classifier
+    track_name = "CrewAI Offline" if is_crewai else "OpenAI Direct"
+    attempt_summary = (
+        f"LLM calls: {attempts}; workflows: {len(results)}; workflow retry: 0"
+        if is_crewai
+        else f"outbound attempts: {attempts}; retry: {retry_attempts}"
+    )
+    bundle_note = (
+        " Tor CrewAI ma ten sam snapshot modelu, runner dataset, schema i decision "
+        "policy co Direct, ale używa osobnych promptów ról/zadań oraz dodaje trzy "
+        "role i frozen domain evidence. Różnica jest `system_bundle_delta`, nie "
+        "czystym wpływem frameworka."
+        if is_crewai
+        else ""
+    )
+    report = f"""# Raport pilota jakości phishing classifier — {track_name}
 
 Status: `{campaign_status}`  
 Wniosek porównawczy: `INCONCLUSIVE`  
@@ -754,7 +812,7 @@ Run: `{manifest.get('run_id')}`
 - F1: {f1['value']} ({2 * tp}/{2 * tp + fp + fn});
 - FPR: {false_positive_rate['value']} ({fp}/{fp + tn}), Wilson 95% CI {false_positive_rate['confidence_interval_95']['lower']}–{false_positive_rate['confidence_interval_95']['upper']};
 - specificity: {specificity['value']} ({tn}/{tn + fp}), Wilson 95% CI {specificity['confidence_interval_95']['lower']}–{specificity['confidence_interval_95']['upper']};
-- błędy techniczne: {technical_failure_count}; retry: {retry_attempts};
+- błędy techniczne: {technical_failure_count}; {attempt_summary};
 - bramki jakości: {'PASS' if acceptance_pass else 'HOLD'}; malicious `allow`: {fn}/2 max; benign `warn|hide`: {fp}/3 max; benign `hide`: {action_by_class['benign'].get('hide', 0)}/0 max;
 - security probe `allow`: {security_probe_allow};
 - krytyczne security events: {critical_security_events};
@@ -763,7 +821,7 @@ Run: `{manifest.get('run_id')}`
 
 ## Interpretacja
 
-To jest pilot n=30 na danych wyłącznie syntetycznych i challenge-enriched. Metryki i przedziały Wilsona są opisowe. Technical failures są mapowane przez zamrożoną `technical_failure_action` i pozostają w mianownikach. Nie jest to dowód gotowości produkcyjnej, jakości na rzeczywistym ruchu ani przewagi nad innym modelem; wniosek porównawczy zawsze pozostaje `INCONCLUSIVE`.
+To jest pilot n=30 na danych wyłącznie syntetycznych i challenge-enriched. Metryki i przedziały Wilsona są opisowe. Technical failures są mapowane przez zamrożoną `technical_failure_action` i pozostają w mianownikach. Nie jest to dowód gotowości produkcyjnej, jakości na rzeczywistym ruchu ani przewagi nad innym modelem; wniosek porównawczy zawsze pozostaje `INCONCLUSIVE`.{bundle_note}
 
 `PILOT_READY_FOR_SELECTION` oznacza wyłącznie przejście zamrożonych bramek tego pilota i zgodę na rozpoczęcie osobnego etapu selection. `PILOT_HOLD` wymaga przeglądu przed kolejnymi płatnymi próbami. `INVALID` albo `SECURITY_FAIL` blokuje użycie tego runu jako wyniku jakości.
 """

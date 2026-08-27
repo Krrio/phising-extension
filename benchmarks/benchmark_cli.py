@@ -6,7 +6,11 @@ import json
 import sys
 from pathlib import Path
 
-from phishing_bench.contracts import ContractError, load_and_validate_campaign
+from phishing_bench.contracts import (
+    CREWAI_PROFILES,
+    ContractError,
+    load_and_validate_campaign,
+)
 from phishing_bench.runner import api_key_from_environment, readiness_report, run_campaign
 from phishing_bench.scoring import score_run
 
@@ -29,7 +33,10 @@ def _path(value: str) -> Path:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="benchmark_cli.py",
-        description="Bezpieczny harness OpenAI Direct: smoke oraz syntetyczny pilot jakości.",
+        description=(
+            "Bezpieczny harness OpenAI Direct i CrewAI Offline: smoke oraz "
+            "syntetyczny pilot jakości."
+        ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -63,14 +70,31 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "validate":
-            report = readiness_report(args.campaign, REPO_ROOT, check_local_tls=True)
+            config, _ = load_and_validate_campaign(args.campaign, REPO_ROOT)
+            if config.get("evaluation_profile") in CREWAI_PROFILES:
+                from phishing_bench.crewai_offline import crewai_readiness_report
+
+                report = crewai_readiness_report(
+                    args.campaign, REPO_ROOT, check_local_tls=True
+                )
+            else:
+                report = readiness_report(args.campaign, REPO_ROOT, check_local_tls=True)
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
             return 0
 
         if args.command == "run":
             config, _ = load_and_validate_campaign(args.campaign, REPO_ROOT)
             if not args.live:
-                report = readiness_report(args.campaign, REPO_ROOT, check_local_tls=True)
+                if config.get("evaluation_profile") in CREWAI_PROFILES:
+                    from phishing_bench.crewai_offline import crewai_readiness_report
+
+                    report = crewai_readiness_report(
+                        args.campaign, REPO_ROOT, check_local_tls=True
+                    )
+                else:
+                    report = readiness_report(
+                        args.campaign, REPO_ROOT, check_local_tls=True
+                    )
                 print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
                 print(
                     "\nDRY-RUN: nie wykonano żadnego requestu. "
@@ -84,15 +108,31 @@ def main(argv: list[str] | None = None) -> int:
             api_key = api_key_from_environment(args.campaign, REPO_ROOT)
             if not api_key:
                 raise ContractError("ustaw OPENAI_API_KEY w środowisku procesu")
-            run_dir = run_campaign(
-                config_path=args.campaign,
-                repo_root=REPO_ROOT,
-                output_root=args.output_root,
-                api_key=api_key,
-                store_reasoning=args.store_reasoning,
-                live_authorized=args.live,
-                confirm_campaign=args.confirm_campaign,
-            )
+            if config.get("evaluation_profile") in CREWAI_PROFILES:
+                # Import only after the CLI has independently confirmed an
+                # explicitly exported key. CrewAI 1.15.8 can load .env during
+                # import and must never bypass this gate.
+                from phishing_bench.crewai_offline import run_crewai_campaign
+
+                run_dir = run_crewai_campaign(
+                    config_path=args.campaign,
+                    repo_root=REPO_ROOT,
+                    output_root=args.output_root,
+                    api_key=api_key,
+                    store_reasoning=args.store_reasoning,
+                    live_authorized=args.live,
+                    confirm_campaign=args.confirm_campaign,
+                )
+            else:
+                run_dir = run_campaign(
+                    config_path=args.campaign,
+                    repo_root=REPO_ROOT,
+                    output_root=args.output_root,
+                    api_key=api_key,
+                    store_reasoning=args.store_reasoning,
+                    live_authorized=args.live,
+                    confirm_campaign=args.confirm_campaign,
+                )
             print(f"Run zakończony. Wyniki: {run_dir}")
             return 0
 

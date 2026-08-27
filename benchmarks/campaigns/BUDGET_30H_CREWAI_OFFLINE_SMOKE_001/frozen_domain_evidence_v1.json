@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "reserved_domains_offline_v1",
+  "as_of": "2026-08-26T00:00:00Z",
+  "source_mode": "runner_input_signals_plus_reserved_domain_policy",
+  "reserved_suffixes": [".example", ".invalid", ".test", ".localhost"],
+  "registration_status": "not_applicable_reserved_tld",
+  "registration_source": "frozen_reserved_domain_policy",
+  "network_fallback": false,
+  "live_rdap": false,
+  "live_whois": false,
+  "render_version": "frozen_domain_evidence_render_v1"
+}

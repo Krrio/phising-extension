@@ -114,11 +114,21 @@ def _validate_run_integrity(
         "invalid",
     } or not manifest.get("finished_at"):
         raise ContractError("run manifest is not in a finished state")
+    is_crewai = runtime.get("adapter") == "crewai_sequential_offline"
     expected_artifact_hashes = {
         "attempts_jsonl_sha256": sha256_file(run_dir / "attempts.jsonl"),
         "results_jsonl_sha256": sha256_file(run_dir / "results.jsonl"),
         "budget_ledger_json_sha256": sha256_file(run_dir / "budget_ledger.json"),
     }
+    if is_crewai:
+        expected_artifact_hashes.update(
+            {
+                "calls_jsonl_sha256": sha256_file(run_dir / "calls.jsonl"),
+                "tool_events_jsonl_sha256": sha256_file(
+                    run_dir / "tool_events.jsonl"
+                ),
+            }
+        )
     if manifest.get("artifact_hashes") != expected_artifact_hashes:
         raise ContractError("run artifact hash mismatch; the closed run was modified")
     expected_identity = {
@@ -172,6 +182,76 @@ def _validate_run_integrity(
                 raise ContractError("non-zero-tolerance event cannot self-declare critical")
     if len(all_attempt_ids) != len(set(all_attempt_ids)):
         raise ContractError("attempt_id is reused across ResultRecords")
+
+    if is_crewai:
+        call_records = read_jsonl(run_dir / "calls.jsonl")
+        tool_events = read_jsonl(run_dir / "tool_events.jsonl")
+        call_attempt_ids = [row.get("attempt_id") for row in call_records]
+        if (
+            len(call_records) != len(all_attempt_ids)
+            or len(call_attempt_ids) != len(set(call_attempt_ids))
+            or set(call_attempt_ids) != set(all_attempt_ids)
+        ):
+            raise ContractError("CrewAI call log differs from ResultRecord attempts")
+        result_ids = {result["sample_id"] for result in results}
+        tool_ids = [row.get("event_id") for row in tool_events]
+        if len(tool_ids) != len(set(tool_ids)):
+            raise ContractError("CrewAI tool event_id values are duplicated")
+        tool_by_id = {row.get("event_id"): row for row in tool_events}
+        for row in call_records:
+            if (
+                row.get("schema_version") != "1.0"
+                or row.get("record_type") != "CallRecord"
+                or row.get("run_id") != manifest.get("run_id")
+                or row.get("sample_id") not in result_ids
+                or row.get("role")
+                not in {"domain_analyst", "content_analyst", "orchestrator"}
+            ):
+                raise ContractError("invalid CrewAI CallRecord contract")
+        for row in tool_events:
+            if (
+                row.get("schema_version") != "1.0"
+                or row.get("record_type") != "ToolEvent"
+                or row.get("run_id") != manifest.get("run_id")
+                or row.get("sample_id") not in result_ids
+                or row.get("network_used") is not False
+                or row.get("status") != "success"
+                or row.get("tool_name")
+                not in {
+                    "frozen_product_domain_signal",
+                    "frozen_reserved_domain_registration",
+                }
+            ):
+                raise ContractError("invalid or networked CrewAI frozen tool event")
+        for result in results:
+            result_calls = [
+                row for row in call_records if row.get("sample_id") == result["sample_id"]
+            ]
+            result_tools = result.get("tool_event_ids")
+            if (
+                result.get("llm_call_count") != result.get("outbound_attempts")
+                or result.get("llm_call_count", 0) > 3
+                or not isinstance(result_tools, list)
+                or any(event_id not in tool_by_id for event_id in result_tools)
+                or any(
+                    tool_by_id[event_id].get("sample_id") != result["sample_id"]
+                    for event_id in result_tools
+                )
+            ):
+                raise ContractError("CrewAI result call/tool accounting drift")
+            if result.get("status") == "success" and (
+                [
+                    (row.get("role"), row.get("task_name"))
+                    for row in result_calls
+                ]
+                != [
+                    ("domain_analyst", "domain_analysis"),
+                    ("content_analyst", "content_analysis"),
+                    ("orchestrator", "synthesis"),
+                ]
+                or len(result_tools) != 2
+            ):
+                raise ContractError("successful CrewAI sample lacks its frozen call/tool profile")
 
     attempts_path = run_dir / "attempts.jsonl"
     attempt_events = read_jsonl(attempts_path) if attempts_path.is_file() else []
@@ -306,11 +386,16 @@ def _validate_run_integrity(
         or ledger.get("attempts_finished") != len(finished_ids)
         or ledger.get("attempts_started", 0) > ledger.get("max_attempts", -1)
         or ledger.get("reserved_or_observed_cost_usd", 0) > ledger.get("max_cost_usd", -1) + 1e-9
-        or abs(
-            sum(float(event["cost_reservation_usd"]) for event in started)
-            - float(ledger.get("reserved_or_observed_cost_usd", -1))
+        or (
+            abs(
+                sum(float(event["cost_reservation_usd"]) for event in started)
+                - float(ledger.get("reserved_or_observed_cost_usd", -1))
+            )
+            > 1e-9
+            if not is_crewai
+            else sum(float(event["cost_reservation_usd"]) for event in started)
+            > float(ledger.get("reserved_or_observed_cost_usd", -1)) + 1e-9
         )
-        > 1e-9
     ):
         raise ContractError("budget ledger is inconsistent or exceeds a hard cap")
     result_cost = round(sum(float(result.get("observed_cost_usd", 0)) for result in results), 10)
@@ -392,15 +477,28 @@ def score_run(
         raise ContractError("scoring bundle sample IDs differ from the frozen runner dataset")
     scoring_manifest_path = labels_path.parent / "scoring_manifest.json"
     scoring_manifest = read_json(scoring_manifest_path)
-    if scoring_manifest != {
+    expected_scoring_manifest = {
         "schema_version": "1.0",
-        "campaign_id": manifest.get("campaign_id"),
         "sample_count": len(labels),
         "runner_dataset_sha256": manifest.get("readiness", {}).get("hashes", {}).get(
             "dataset_sha256"
         ),
         "labels_sha256": sha256_file(labels_path),
-    }:
+    }
+    campaign_compatible = bool(
+        scoring_manifest.get("campaign_id") == manifest.get("campaign_id")
+        or manifest.get("campaign_id")
+        in scoring_manifest.get("compatible_campaign_ids", [])
+    )
+    comparable_scoring_manifest = {
+        key: value
+        for key, value in scoring_manifest.items()
+        if key not in {"campaign_id", "compatible_campaign_ids"}
+    }
+    if (
+        not campaign_compatible
+        or comparable_scoring_manifest != expected_scoring_manifest
+    ):
         raise ContractError("scoring_manifest.json does not freeze this dataset/label bundle")
     output_dir = (output_dir or (run_dir / "scoring")).resolve()
     if output_dir in {Path("/").resolve(), Path.home().resolve(), repo_root.resolve()}:
@@ -483,7 +581,15 @@ def score_run(
     successful = [result for result in results if result.get("status") == "success"]
     valid_schema_count = sum(bool(result.get("response_schema_valid")) for result in results)
     attempts = sum(int(result.get("outbound_attempts", 0)) for result in results)
-    retry_attempts = sum(max(int(result.get("outbound_attempts", 0)) - 1, 0) for result in results)
+    is_crewai = runtime_config.get("adapter") == "crewai_sequential_offline"
+    retry_attempts = (
+        0
+        if is_crewai
+        else sum(
+            max(int(result.get("outbound_attempts", 0)) - 1, 0)
+            for result in results
+        )
+    )
     observed_cost = round(sum(float(result.get("observed_cost_usd", 0)) for result in results), 10)
     cost_unknown_attempts = sum(int(result.get("cost_unknown_attempts", 0)) for result in results)
     critical_security_events = sum(
@@ -546,6 +652,10 @@ def score_run(
         "stage": "ENGINEERING_PILOT",
         "campaign_status": campaign_status,
         "comparative_conclusion": "INCONCLUSIVE",
+        "evaluation_track": "crewai_offline" if is_crewai else "openai_direct",
+        "comparison_scope": (
+            runtime_config.get("system_bundle_delta") if is_crewai else None
+        ),
         "disclaimer": (
             "Five synthetic records validate the harness only. They do not estimate precision, recall, "
             "F1, false-positive rate, production readiness, or model superiority."
@@ -577,6 +687,8 @@ def score_run(
             "outbound": attempts,
             "retries": retry_attempts,
             "cost_unknown_attempts": cost_unknown_attempts,
+            "semantics": "llm_calls" if is_crewai else "direct_provider_attempts",
+            "workflows": len(results) if is_crewai else attempts - retry_attempts,
         },
         "usage": token_totals,
         "cost": {
@@ -646,7 +758,25 @@ def score_run(
         if technical_failure_count
         else ""
     )
-    report = f"""# Raport OpenAI Direct smoke
+    report_title = "Raport CrewAI Offline smoke" if is_crewai else "Raport OpenAI Direct smoke"
+    attempt_line = (
+        f"LLM calls: {attempts}; workflow retry: {retry_attempts}"
+        if is_crewai
+        else f"outbound attempts: {attempts}, w tym retry: {retry_attempts}"
+    )
+    track_note = (
+        " To jest pomiar całego bundle CrewAI: ten sam snapshot, dataset, schema i "
+        "decision policy co Direct, ale osobne prompty ról/zadań, trzy role oraz "
+        "frozen evidence; nie jest to czysta delta frameworka."
+        if is_crewai
+        else ""
+    )
+    next_step = (
+        "ręczna inspekcja pięciu rekordów oraz `calls.jsonl`, a potem osobna decyzja o pilocie n=30"
+        if is_crewai
+        else "ręczna inspekcja pięciu rekordów, a potem pilot 20–30 wiadomości"
+    )
+    report = f"""# {report_title}
 
 Status: `{campaign_status}`  
 Run: `{manifest.get('run_id')}`  
@@ -658,7 +788,7 @@ Etap: `ENGINEERING_PILOT`
 - statusy końcowe: {status_summary};
 - poprawny strict schema output: {valid_schema_count}/{expected_count};
 - błędy techniczne: {technical_failure_count};
-- outbound attempts: {attempts}, w tym retry: {retry_attempts};
+- {attempt_line};
 - próby bez potwierdzonego usage/kosztu: {cost_unknown_attempts};
 - zgodność implementacji action mapping: {expected_count - action_mapping_errors}/{expected_count};
 - ręczny golden action check: {action_match_count}/{golden_evaluable_count} ocenialnych; nieocenione: {expected_count - golden_evaluable_count};
@@ -668,9 +798,9 @@ Etap: `ENGINEERING_PILOT`
 
 ## Interpretacja
 
-To jest test przewodu na pięciu syntetycznych wiadomościach. Nie wolno na jego podstawie podawać precision, recall, F1, FPR, p95/p99, rankingu modeli ani twierdzić, że system jest gotowy produkcyjnie. Wynik porównawczy pozostaje `INCONCLUSIVE`.
+To jest test przewodu na pięciu syntetycznych wiadomościach. Nie wolno na jego podstawie podawać precision, recall, F1, FPR, p95/p99, rankingu modeli ani twierdzić, że system jest gotowy produkcyjnie. Wynik porównawczy pozostaje `INCONCLUSIVE`.{track_note}
 {technical_note}
-Jeżeli status jest `READINESS_PASS`, kolejnym krokiem jest ręczna inspekcja pięciu rekordów, a potem pilot 20–30 wiadomości. `READINESS_PASS_WITH_GOLDEN_MISMATCH` oznacza, że harness działa, ale co najmniej jedna oczekiwana akcja wymaga przeglądu. `SECURITY_FAIL` blokuje dalsze płatne próby.
+Jeżeli status jest `READINESS_PASS`, kolejnym krokiem jest {next_step}. `READINESS_PASS_WITH_GOLDEN_MISMATCH` oznacza, że harness działa, ale co najmniej jedna oczekiwana akcja wymaga przeglądu. `SECURITY_FAIL` blokuje dalsze płatne próby.
 """
     atomic_write_text(output_dir / "report.md", report)
     return output_dir
