@@ -13,10 +13,25 @@ from .io_utils import canonical_json, read_json, read_jsonl, sha256_file, sha256
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 SMOKE_PROFILE = "openai_direct_smoke_v1"
 QUALITY_PILOT_PROFILE = "openai_direct_quality_pilot_v1"
+GPT54_NANO_SMOKE_PROFILE = "openai_direct_gpt54_nano_smoke_v1"
+GPT54_NANO_QUALITY_PILOT_PROFILE = (
+    "openai_direct_gpt54_nano_quality_pilot_v1"
+)
 CREWAI_SMOKE_PROFILE = "crewai_offline_smoke_v1"
 CREWAI_QUALITY_PILOT_PROFILE = "crewai_offline_quality_pilot_v1"
-QUALITY_PROFILES = {QUALITY_PILOT_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
+GPT54_NANO_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"
+GPT54_NANO_PROFILES = {
+    GPT54_NANO_SMOKE_PROFILE,
+    GPT54_NANO_QUALITY_PILOT_PROFILE,
+}
+DIRECT_SMOKE_PROFILES = {SMOKE_PROFILE, GPT54_NANO_SMOKE_PROFILE}
+QUALITY_PROFILES = {
+    QUALITY_PILOT_PROFILE,
+    GPT54_NANO_QUALITY_PILOT_PROFILE,
+    CREWAI_QUALITY_PILOT_PROFILE,
+}
 CREWAI_PROFILES = {CREWAI_SMOKE_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
+SMOKE_PROFILES = DIRECT_SMOKE_PROFILES | {CREWAI_SMOKE_PROFILE}
 CATEGORIES = {
     "credential_request",
     "urgency",
@@ -178,16 +193,19 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     evaluation_profile = config.get("evaluation_profile", SMOKE_PROFILE)
     is_crewai = evaluation_profile in CREWAI_PROFILES
     is_quality = evaluation_profile in QUALITY_PROFILES
+    is_gpt54_nano = evaluation_profile in GPT54_NANO_PROFILES
     if is_quality:
         required |= {
             "evaluation_profile",
             "expected_sample_count",
             "dataset_manifest_path",
         }
-    elif evaluation_profile == CREWAI_SMOKE_PROFILE:
+    elif evaluation_profile in {CREWAI_SMOKE_PROFILE, GPT54_NANO_SMOKE_PROFILE}:
         required |= {"evaluation_profile", "expected_sample_count"}
     elif evaluation_profile != SMOKE_PROFILE:
         raise ContractError(f"unsupported evaluation_profile: {evaluation_profile}")
+    if is_gpt54_nano:
+        required |= {"request_profile", "reasoning_effort"}
     if is_crewai:
         required |= {
             "crewai_version",
@@ -218,6 +236,13 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     model = config["requested_model"]
     if not isinstance(model, str) or not re.search(r"-20\d{2}-\d{2}-\d{2}$", model):
         raise ContractError("requested_model must be an exact dated snapshot, never an alias/latest")
+    expected_model = (
+        "gpt-5.4-nano-2026-03-17"
+        if is_gpt54_nano
+        else "gpt-4o-mini-2024-07-18"
+    )
+    if model != expected_model:
+        raise ContractError("requested_model differs from the frozen evaluation profile")
     if config["api_key_env"] != "OPENAI_API_KEY":
         raise ContractError("API key must come from OPENAI_API_KEY")
     if (
@@ -229,6 +254,11 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         or config["concurrency"] != 1
     ):
         raise ContractError("frozen profiles require temperature=0 and concurrency=1")
+    if is_gpt54_nano and (
+        config["request_profile"] != GPT54_NANO_REQUEST_PROFILE
+        or config["reasoning_effort"] != "none"
+    ):
+        raise ContractError("GPT-5.4 nano request profile/reasoning drift")
     if (
         isinstance(config["max_output_tokens"], bool)
         or not isinstance(config["max_output_tokens"], int)
@@ -288,7 +318,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             raise ContractError("CrewAI system_bundle_delta disclosure drift")
     elif config["max_retries_per_sample"] not in {0, 1}:
         raise ContractError("Direct profiles allow at most one retry per sample")
-    if evaluation_profile == QUALITY_PILOT_PROFILE:
+    if is_quality and not is_crewai:
         if config["max_retries_per_sample"] != 1:
             raise ContractError("quality pilot requires exactly one configured retry")
         if config["request_timeout_seconds"] != 45:
@@ -298,13 +328,18 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     budget = config["budget"]
     if not isinstance(budget, dict) or set(budget) != {"max_attempts", "max_cost_usd", "max_wall_seconds"}:
         raise ContractError("invalid budget contract")
-    if evaluation_profile == SMOKE_PROFILE:
+    if evaluation_profile in DIRECT_SMOKE_PROFILES:
         if (
             isinstance(budget["max_attempts"], bool)
             or not isinstance(budget["max_attempts"], int)
             or not 1 <= budget["max_attempts"] <= 10
         ):
             raise ContractError("smoke max_attempts must be in 1..10")
+        if evaluation_profile == GPT54_NANO_SMOKE_PROFILE:
+            if config["expected_sample_count"] != 5:
+                raise ContractError("GPT-5.4 nano smoke requires expected_sample_count=5")
+            if budget["max_attempts"] != 10:
+                raise ContractError("GPT-5.4 nano smoke requires max_attempts=10")
     elif is_quality:
         expected_sample_count = config["expected_sample_count"]
         if (
@@ -338,15 +373,15 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         or not 0 < budget["max_cost_usd"] <= 1
     ):
         raise ContractError("max_cost_usd is required and must be in (0, 1]")
-    if evaluation_profile in {SMOKE_PROFILE, CREWAI_SMOKE_PROFILE}:
+    if evaluation_profile in SMOKE_PROFILES:
         if (
             isinstance(budget["max_wall_seconds"], bool)
             or not isinstance(budget["max_wall_seconds"], int)
             or not 1 <= budget["max_wall_seconds"] <= 1800
         ):
             raise ContractError("smoke max_wall_seconds must be in 1..1800")
-        if is_crewai and float(budget["max_cost_usd"]) != 0.05:
-            raise ContractError("CrewAI smoke requires max_cost_usd=0.05")
+        if (is_crewai or is_gpt54_nano) and float(budget["max_cost_usd"]) != 0.05:
+            raise ContractError("frozen smoke profile requires max_cost_usd=0.05")
     else:
         if float(budget["max_cost_usd"]) != 0.25:
             raise ContractError("quality pilot requires max_cost_usd=0.25")
@@ -396,18 +431,30 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         for key in ("input", "cached_input", "output")
     ):
         raise ContractError("invalid pricing snapshot")
+    expected_pricing = (
+        (
+            0.20,
+            0.02,
+            1.25,
+            "https://developers.openai.com/api/docs/models/gpt-5.4-nano",
+        )
+        if is_gpt54_nano
+        else (
+            0.15,
+            0.075,
+            0.60,
+            "https://developers.openai.com/api/docs/models/gpt-4o-mini",
+        )
+    )
     if (
         float(pricing["input"]),
         float(pricing["cached_input"]),
         float(pricing["output"]),
         pricing["source"],
-    ) != (
-        0.15,
-        0.075,
-        0.60,
-        "https://developers.openai.com/api/docs/models/gpt-4o-mini",
-    ):
+    ) != expected_pricing:
         raise ContractError("pricing differs from the frozen OpenAI snapshot")
+    if is_gpt54_nano and pricing["source_checked_at"] != "2026-08-28":
+        raise ContractError("GPT-5.4 nano pricing check date drift")
 
     resolved: dict[str, Path] = {}
     asset_path_keys = [
@@ -478,17 +525,31 @@ def build_user_message(record: dict[str, Any]) -> str:
 def build_chat_request(
     config: dict[str, Any], record: dict[str, Any], prompt: str, response_schema: dict[str, Any]
 ) -> dict[str, Any]:
-    body = {
-        "model": config["requested_model"],
-        "temperature": config["temperature"],
-        "max_tokens": config["max_output_tokens"],
-        "store": False,
-        "messages": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": build_user_message(record)},
-        ],
-        "response_format": response_schema,
-    }
+    if config.get("evaluation_profile") in GPT54_NANO_PROFILES:
+        body = {
+            "model": config["requested_model"],
+            "temperature": config["temperature"],
+            "reasoning_effort": config["reasoning_effort"],
+            "max_completion_tokens": config["max_output_tokens"],
+            "store": False,
+            "messages": [
+                {"role": "developer", "content": prompt},
+                {"role": "user", "content": build_user_message(record)},
+            ],
+            "response_format": response_schema,
+        }
+    else:
+        body = {
+            "model": config["requested_model"],
+            "temperature": config["temperature"],
+            "max_tokens": config["max_output_tokens"],
+            "store": False,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": build_user_message(record)},
+            ],
+            "response_format": response_schema,
+        }
     validate_outgoing_request(config, body)
     return body
 
@@ -521,11 +582,32 @@ def build_crewai_workflow_contract(
 
 
 def validate_outgoing_request(config: dict[str, Any], body: dict[str, Any]) -> None:
-    expected_keys = {"model", "temperature", "max_tokens", "store", "messages", "response_format"}
+    is_gpt54_nano = config.get("evaluation_profile") in GPT54_NANO_PROFILES
+    expected_keys = (
+        {
+            "model",
+            "temperature",
+            "reasoning_effort",
+            "max_completion_tokens",
+            "store",
+            "messages",
+            "response_format",
+        }
+        if is_gpt54_nano
+        else {"model", "temperature", "max_tokens", "store", "messages", "response_format"}
+    )
     if set(body) != expected_keys:
         raise ContractError("outgoing request contains an unexpected capability or field")
     if body["model"] != config["requested_model"] or body["store"] is not False:
         raise ContractError("model/store drift in outgoing request")
+    token_limit_field = "max_completion_tokens" if is_gpt54_nano else "max_tokens"
+    if (
+        body["temperature"] != config["temperature"]
+        or body[token_limit_field] != config["max_output_tokens"]
+    ):
+        raise ContractError("sampling/token limit drift in outgoing request")
+    if is_gpt54_nano and body["reasoning_effort"] != "none":
+        raise ContractError("GPT-5.4 nano requires reasoning_effort=none")
     for forbidden in (
         "tools",
         "tool_choice",
@@ -546,8 +628,14 @@ def validate_outgoing_request(config: dict[str, Any], body: dict[str, Any]) -> N
     schema = json_schema.get("schema", {})
     if schema.get("additionalProperties") is not False:
         raise ContractError("response schema must reject additional properties")
-    if [message.get("role") for message in body["messages"]] != ["system", "user"]:
-        raise ContractError("every sample must be a fresh system+user request")
+    expected_instruction_role = "developer" if is_gpt54_nano else "system"
+    if [message.get("role") for message in body["messages"]] != [
+        expected_instruction_role,
+        "user",
+    ]:
+        raise ContractError(
+            f"every sample must be a fresh {expected_instruction_role}+user request"
+        )
     assert_no_label_keys(body)
 
 
@@ -665,6 +753,8 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
                 raise ContractError(f"invalid dataset manifest hash: {hash_key}")
         if ".localhost" in canonical_json(dataset).casefold():
             raise ContractError("quality pilot excludes .localhost fixtures")
+    elif len(dataset) != int(config.get("expected_sample_count", 5)):
+        raise ContractError("smoke dataset must contain exactly 5 records")
     prompt = paths["prompt_path"].read_text(encoding="utf-8").strip()
     if not prompt or len(prompt) > 30_000:
         raise ContractError("prompt must be non-empty and <= 30k chars")

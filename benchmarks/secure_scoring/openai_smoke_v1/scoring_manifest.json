@@ -3,6 +3,7 @@
   "campaign_id": "BUDGET_30H_OPENAI_SMOKE_001",
   "compatible_campaign_ids": [
     "BUDGET_30H_OPENAI_SMOKE_001",
+    "BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001",
     "BUDGET_30H_CREWAI_OFFLINE_SMOKE_001"
   ],
   "sample_count": 5,

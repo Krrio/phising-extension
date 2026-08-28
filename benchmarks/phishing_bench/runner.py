@@ -13,7 +13,8 @@ from typing import Any, Callable
 from . import __version__
 from .contracts import (
     ContractError,
-    QUALITY_PILOT_PROFILE,
+    GPT54_NANO_PROFILES,
+    QUALITY_PROFILES,
     action_for_output,
     build_chat_request,
     load_and_validate_campaign,
@@ -139,7 +140,7 @@ def readiness_report(
     evaluation_profile = config.get("evaluation_profile", "openai_direct_smoke_v1")
     required_cost_cap = (
         round(projected_ceiling * 1.2, 10)
-        if evaluation_profile == QUALITY_PILOT_PROFILE
+        if evaluation_profile in QUALITY_PROFILES
         else projected_ceiling
     )
     if required_cost_cap > float(config["budget"]["max_cost_usd"]):
@@ -160,6 +161,23 @@ def readiness_report(
         "requested_model": config["requested_model"],
         "endpoint": config["endpoint"],
         "adapter": config["adapter"],
+        "request_contract": {
+            "request_profile": config.get(
+                "request_profile", "chat_completions_legacy_v1"
+            ),
+            "instruction_role": (
+                "developer"
+                if evaluation_profile in GPT54_NANO_PROFILES
+                else "system"
+            ),
+            "token_limit_field": (
+                "max_completion_tokens"
+                if evaluation_profile in GPT54_NANO_PROFILES
+                else "max_tokens"
+            ),
+            "reasoning_effort": config.get("reasoning_effort"),
+            "temperature": config["temperature"],
+        },
         "security_contract": {
             "store": False,
             "tools": "absent",

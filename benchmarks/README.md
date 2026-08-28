@@ -14,7 +14,7 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe i wykonane są dwa tory, każdy ze smoke `n=5` i pilotem jakości `n=30`: OpenAI Direct oraz CrewAI Offline. Oba piloty zakończyły się technicznie poprawnie, zostały policzone i mają status `PILOT_HOLD`. Jest też wspólny, całkowicie offline exporter `compare`, który sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
+Gotowe i wykonane są dwa tory, każdy ze smoke `n=5` i pilotem jakości `n=30`: OpenAI Direct oraz CrewAI Offline. Oba piloty zakończyły się technicznie poprawnie, zostały policzone i mają status `PILOT_HOLD`. Trzeci tor, OpenAI Direct z przypiętym `gpt-5.4-nano-2026-03-17`, jest zaimplementowany i lokalnie zweryfikowany, ale czeka na pierwszy live smoke. Jest też wspólny, całkowicie offline exporter `compare`, który sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
 
 ```text
 5 syntetycznych runner inputs
@@ -64,6 +64,8 @@ Najważniejsze pliki:
 | `fixtures/openai_pilot_030_v1/dataset_manifest.json` | publiczny, label-free manifest pochodzenia i transformacji |
 | `secure_scoring/openai_pilot_030_v1/` | labele, metadane, selekcja, provenance i zamrożony scoring manifest |
 | `campaigns/BUDGET_30H_OPENAI_PILOT_030_001/` | właściwa kampania pilota z limitem 60 attempts / 0,25 USD / 2 h |
+| `campaigns/BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001/` | challenger GPT-5.4 nano: smoke 5, reasoning `none`, aktualny kontrakt Chat Completions |
+| `campaigns/BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001/` | ten sam zestaw 30 co baseline, limit 60 attempts / 0,25 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
@@ -73,6 +75,7 @@ Najważniejsze pliki:
 | `tests/test_benchmark.py` | deterministyczne testy bez API i bez kosztu |
 | `tests/test_crewai_offline.py` | pełny kickoff CrewAI z zamockowaną wyłącznie granicą providera oraz testy telemetrii, egressu i budżetu |
 | `tests/test_comparison.py` | porównania sparowane, wykrywanie manipulacji i bezpieczny eksport CSV |
+| `tests/test_gpt54_nano_campaign.py` | drift modelu/requestu/cen oraz pełny mockowany run i scoring GPT-5.4 nano |
 
 Tor Direct używa wyłącznie biblioteki standardowej Pythona i nie ma niewidocznych retry SDK. Tor CrewAI działa w przypiętym środowisku backendu (`crewai==1.15.8`), ale wymusza `max_retries=0`, trzy calls na workflow, dokładny Chat Completions endpoint i `store=false`. Oba tory blokują egress poza `api.openai.com`, ignorują proxy, nie pobierają URL-i z wiadomości i odmawiają live runu przy aktywnym `SSLKEYLOGFILE`. CrewAI ma dodatkowo wyłączone anonimowe OTLP telemetry, tracking oraz first-run tracing przed pierwszym importem frameworka.
 
@@ -311,6 +314,88 @@ backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
 
 Właściwy live pilot miał limit 90 calls, 0,25 USD i 2 godziny; konserwatywna rezerwacja z marginesem wynosiła około 0,1589 USD. Scoring korzysta z `benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl`. Zachowaj istniejący run — nowy campaign ID jest wymagany dla każdego świadomego powtórzenia lub zmiany konfiguracji.
 
+## Challenger OpenAI Direct: GPT-5.4 nano
+
+Ten tor izoluje możliwie małą zmianę względem bazowego Direct: używa dokładnie tych samych runner inputs, treści promptu, strict JSON Schema i decision policy, ale przypina snapshot `gpt-5.4-nano-2026-03-17`. Pozostaje na Chat Completions, aby nie mieszać zmiany modelu ze zmianą endpointu. Kontrakt właściwy dla GPT-5.4 używa roli `developer`, `max_completion_tokens`, `reasoning_effort="none"`, `temperature=0`, `store=false`, bez tools i z jednym wyborem odpowiedzi. Ta adaptacja API jest jawnie zapisywana w readiness i eksportach porównawczych.
+
+### 1. Lokalne testy, readiness i dry-run smoke — 0 USD
+
+```bash
+GPT54_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001/runtime_config.json"
+
+python3 -m unittest discover -s benchmarks/tests -v
+
+python3 benchmarks/benchmark_cli.py validate \
+  --campaign "$GPT54_SMOKE_CONFIG"
+
+python3 benchmarks/benchmark_cli.py run \
+  --campaign "$GPT54_SMOKE_CONFIG"
+```
+
+Oczekiwane są: `READY_FOR_MANUAL_LIVE_CONFIRMATION`, pięć rekordów, model `gpt-5.4-nano-2026-03-17`, `instruction_role=developer`, `token_limit_field=max_completion_tokens`, `reasoning_effort=none`, najwyżej 10 attempts i cap 0,05 USD. Konserwatywna rezerwacja pełnego smoke wynosi obecnie około 0,02334 USD. Dry-run nie wymaga klucza i nie wykonuje requestów.
+
+### 2. Dokładnie jeden live smoke i scoring
+
+Najpierw commituj zamrożony harness i upewnij się, że `git status --short` nic nie wypisuje. Następnie:
+
+```bash
+read -s OPENAI_API_KEY
+export OPENAI_API_KEY
+
+python3 benchmarks/benchmark_cli.py run \
+  --campaign "$GPT54_SMOKE_CONFIG" \
+  --live \
+  --confirm-campaign BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001
+
+unset OPENAI_API_KEY
+
+GPT54_SMOKE_RUN="/absolutna/sciezka/wypisana/przez/live-run"
+python3 benchmarks/benchmark_cli.py score \
+  --run-dir "$GPT54_SMOKE_RUN" \
+  --labels benchmarks/secure_scoring/openai_smoke_v1/labels.jsonl
+
+cat "$GPT54_SMOKE_RUN/scoring/report.md"
+```
+
+Nie uruchamiaj automatycznie drugiego smoke. Najpierw sprawdź, czy jest 5/5 terminalnych `success`, strict schema 5/5, zero retry/błędów/security events, potwierdzone usage i resolved model równy przypiętemu snapshotowi. Do pilota przechodź tylko po `READINESS_PASS` lub po świadomym przeglądzie niekrytycznego golden mismatch.
+
+### 3. Pilot GPT-5.4 nano `n=30`
+
+```bash
+GPT54_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001/runtime_config.json"
+
+python3 benchmarks/benchmark_cli.py validate \
+  --campaign "$GPT54_PILOT_CONFIG"
+
+python3 benchmarks/benchmark_cli.py run \
+  --campaign "$GPT54_PILOT_CONFIG"
+```
+
+Readiness pilota rezerwuje około 0,13885 USD na wszystkie możliwe próby, a wymagany cap z marginesem 20% wynosi około 0,16662 USD wobec twardego limitu 0,25 USD. To bezpiecznik liczony konserwatywnym proxy, nie prognoza rachunku.
+
+Po poprawnym smoke i ponownym upewnieniu się, że worktree jest czysty:
+
+```bash
+read -s OPENAI_API_KEY
+export OPENAI_API_KEY
+
+python3 benchmarks/benchmark_cli.py run \
+  --campaign "$GPT54_PILOT_CONFIG" \
+  --live \
+  --confirm-campaign BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001
+
+unset OPENAI_API_KEY
+
+GPT54_PILOT_RUN="/absolutna/sciezka/wypisana/przez/live-run"
+python3 benchmarks/benchmark_cli.py score \
+  --run-dir "$GPT54_PILOT_RUN" \
+  --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl
+
+cat "$GPT54_PILOT_RUN/scoring/report.md"
+```
+
+Pilot ma dokładnie te same 30 próbek i labele co dotychczasowy Direct oraz CrewAI Offline. Dzięki temu po scoringu można go bez dodatkowych calls dodać jako trzeci wariant do `compare`. Wynik nadal jest opisowy i `INCONCLUSIVE`; `n=30` nie wystarcza do deklaracji przewagi ani gotowości produkcyjnej.
+
 ## Porównanie wielu modeli i silników — 0 USD
 
 `compare` nie wykonuje requestów i nie potrzebuje klucza API. Pierwszy `--run` jest baseline. Każdy wariant musi być wcześniej policzony przez `score` na dokładnie tym samym zaufanym bundle labeli. Komenda ponownie sprawdza zamknięte artefakty runu, zgodność datasetu, labeli, decision policy, response schema, per-sample input hash oraz matematykę scoringu.
@@ -318,11 +403,13 @@ Właściwy live pilot miał limit 90 calls, 0,25 USD i 2 godziny; konserwatywna 
 ```bash
 DIRECT_RUN="/absolutna/sciezka/do/direct-pilot"
 CREW_RUN="/absolutna/sciezka/do/crewai-pilot"
-COMPARE_DIR="benchmark-runs/comparisons/OPENAI_DIRECT_VS_CREWAI_PILOT_030_001"
+GPT54_NANO_RUN="/absolutna/sciezka/do/gpt54-nano-pilot"
+COMPARE_DIR="benchmark-runs/comparisons/THREE_WAY_PILOT_030_001"
 
 python3 benchmarks/benchmark_cli.py compare \
   --run "direct=$DIRECT_RUN" \
   --run "crewai=$CREW_RUN" \
+  --run "gpt54_nano=$GPT54_NANO_RUN" \
   --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl \
   --output-dir "$COMPARE_DIR"
 
@@ -404,8 +491,8 @@ Statusy końcowe:
 
 1. Direct i CrewAI Offline smoke oraz pilot `n=30` są ukończone. Zachować runy bez rerunów. Oba są technicznie poprawne, oba mają `PILOT_HOLD`, a porównanie pozostaje `INCONCLUSIVE`.
 2. Wygenerować i archiwizować wspólny eksport `compare`. Bieżący Direct–CrewAI jest `system_bundle_delta`, ponieważ różnią się prompt, orkiestracja i frozen evidence.
-3. Następny challenger na istniejącym koncie OpenAI powinien być osobnym Direct profile z przypiętym modelem klasyfikacyjnym, jednym callem, reasoning wyłączonym i tym samym promptem/schematem/policy. Wymaga osobnego smoke `n=5` przed pilotem `n=30`; nie wolno tylko podmienić modelu w zamkniętej kampanii.
-4. Następnie dodać maksymalnie 2–3 tanie direct adapters innych providerów. Kolejność budżetowa do ponownej weryfikacji tuż przed zamrożeniem kampanii: Cohere `command-r7b-12-2024`, Google `gemini-2.5-flash-lite`, Mistral `mistral-small-2603`; Anthropic Haiku jest opcjonalnym droższym punktem referencyjnym.
+3. Challenger Direct `gpt-5.4-nano-2026-03-17` jest zamrożony i lokalnie zweryfikowany. Wykonać jeden smoke `n=5`; dopiero po jego przejściu jeden pilot `n=30`, bez automatycznych rerunów.
+4. Po policzeniu GPT-5.4 nano wygenerować trzywariantowy eksport. Następnie dodać maksymalnie 2–3 tanie direct adapters innych providerów. Kolejność budżetowa do ponownej weryfikacji tuż przed zamrożeniem kampanii: Cohere `command-r7b-12-2024`, Google `gemini-2.5-flash-lite`, Mistral `mistral-small-2603`; Anthropic Haiku jest opcjonalnym droższym punktem referencyjnym.
 5. Screening: jeden smoke `n=5`, a po przejściu bramki jeden pilot `n=30` na provider. Nie uruchamiać CrewAI dla każdego modelu — zaciera to koszt i wpływ samego silnika.
 6. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
 7. `n=30` służy do screeningu i debugowania, `n=100` do ostrożnego confirmation. Żaden wynik syntetyczny sam w sobie nie dowodzi gotowości produkcyjnej; później potrzebny jest osobny, zanonimizowany i zgodnie dopuszczony zestaw z rzeczywistego rozkładu ruchu.

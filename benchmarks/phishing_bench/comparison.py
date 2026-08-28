@@ -425,6 +425,16 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
     adapters = [config.get("adapter") for config in runtime_configs]
     models = [config.get("requested_model") for config in runtime_configs]
     providers = [config.get("provider") for config in runtime_configs]
+    request_profiles = [
+        config.get("request_profile")
+        or (
+            "crewai_sequential_offline_v1"
+            if config.get("adapter") == "crewai_sequential_offline"
+            else "chat_completions_legacy_v1"
+        )
+        for config in runtime_configs
+    ]
+    reasoning_efforts = [config.get("reasoning_effort") for config in runtime_configs]
     prompt_same = len(set(prompts)) == 1
     adapter_same = len(set(adapters)) == 1
     model_same = len(set(models)) == 1
@@ -447,6 +457,9 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         "same_adapter": adapter_same,
         "same_model": model_same,
         "same_provider": provider_same,
+        "same_request_profile": len(set(request_profiles)) == 1,
+        "request_profiles": request_profiles,
+        "reasoning_efforts": reasoning_efforts,
         "frozen_invariants": public_frozen,
     }
 
@@ -497,6 +510,13 @@ def _run_row(run: LoadedRun) -> dict[str, Any]:
         or config.get("evaluation_profile"),
         "config_id": config.get("config_id"),
         "requested_model": config.get("requested_model"),
+        "request_profile": config.get("request_profile")
+        or (
+            "crewai_sequential_offline_v1"
+            if config.get("adapter") == "crewai_sequential_offline"
+            else "chat_completions_legacy_v1"
+        ),
+        "reasoning_effort": config.get("reasoning_effort"),
         "resolved_models": _resolved_models(run.results),
         "sample_count": dataset.get("sample_count"),
         "malicious_count": dataset.get("class_counts", {}).get("malicious"),
@@ -568,6 +588,13 @@ def _case_rows(run: LoadedRun) -> list[dict[str, Any]]:
                 "provider": config.get("provider"),
                 "adapter": config.get("adapter"),
                 "requested_model": config.get("requested_model"),
+                "request_profile": config.get("request_profile")
+                or (
+                    "crewai_sequential_offline_v1"
+                    if config.get("adapter") == "crewai_sequential_offline"
+                    else "chat_completions_legacy_v1"
+                ),
+                "reasoning_effort": config.get("reasoning_effort"),
                 "resolved_model": raw.get("resolved_model"),
                 "config_id": config.get("config_id"),
                 "sample_id": scored.get("sample_id"),
@@ -812,6 +839,9 @@ def _render_report(
         "Status wniosku: `INCONCLUSIVE`\n\n"
         f"Typ porównania: `{compatibility['comparison_type']}`. "
         f"Baseline: `{compatibility['baseline_variant']}`.\n\n"
+        f"Ten sam profil requestu API: "
+        f"`{str(compatibility['same_request_profile']).lower()}`; "
+        f"profile: `{', '.join(compatibility['request_profiles'])}`.\n\n"
         + "\n".join(table_lines)
         + "\n\n## Różnice sparowane\n\n"
         + "\n".join(pair_lines)
