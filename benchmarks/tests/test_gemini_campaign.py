@@ -43,10 +43,22 @@ SMOKE_V2_CONFIG_PATH = (
     / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_002"
     / "runtime_config.json"
 )
+SMOKE_V3_CONFIG_PATH = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_003"
+    / "runtime_config.json"
+)
 PILOT_CONFIG_PATH = (
     BENCHMARKS_DIR
     / "campaigns"
     / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_001"
+    / "runtime_config.json"
+)
+PILOT_V2_CONFIG_PATH = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_002"
     / "runtime_config.json"
 )
 MINI_SMOKE_CONFIG_PATH = (
@@ -93,8 +105,14 @@ def _output(malicious: bool) -> dict[str, Any]:
 class FakeGeminiCompatibleTransport:
     """Provider-neutral fake proving that the runner consumes ProviderResponse."""
 
-    def __init__(self, plans: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        plans: list[dict[str, Any]],
+        *,
+        omit_response_id: bool = False,
+    ) -> None:
         self.plans = list(plans)
+        self.omit_response_id = omit_response_id
         self.calls: list[dict[str, Any]] = []
 
     def call(
@@ -111,7 +129,11 @@ class FakeGeminiCompatibleTransport:
         )
         content = json.dumps(self.plans.pop(0), ensure_ascii=False)
         return ProviderResponse(
-            response_id=f"interaction-gemini-fake-{len(self.calls)}",
+            response_id=(
+                None
+                if self.omit_response_id
+                else f"interaction-gemini-fake-{len(self.calls)}"
+            ),
             requested_model=body["model"],
             resolved_model=body["model"],
             content=content,
@@ -162,7 +184,13 @@ class GeminiCampaignTests(unittest.TestCase):
         smoke_v2, smoke_v2_assets = load_and_validate_campaign(
             SMOKE_V2_CONFIG_PATH, REPO_ROOT
         )
+        smoke_v3, smoke_v3_assets = load_and_validate_campaign(
+            SMOKE_V3_CONFIG_PATH, REPO_ROOT
+        )
         pilot, pilot_assets = load_and_validate_campaign(PILOT_CONFIG_PATH, REPO_ROOT)
+        pilot_v2, pilot_v2_assets = load_and_validate_campaign(
+            PILOT_V2_CONFIG_PATH, REPO_ROOT
+        )
         mini_smoke = read_json(MINI_SMOKE_CONFIG_PATH)
         mini_pilot = read_json(MINI_PILOT_CONFIG_PATH)
 
@@ -179,6 +207,14 @@ class GeminiCampaignTests(unittest.TestCase):
         self.assertEqual(
             smoke_v2["campaign_id"],
             "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_002",
+        )
+        self.assertEqual(
+            smoke_v3["campaign_id"],
+            "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_003",
+        )
+        self.assertEqual(
+            pilot_v2["campaign_id"],
+            "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_002",
         )
         self.assertIsNone(smoke["temperature"])
         self.assertEqual(smoke["thinking_level"], "minimal")
@@ -203,12 +239,16 @@ class GeminiCampaignTests(unittest.TestCase):
         )
         self.assertEqual(len(smoke_assets["dataset"]), 5)
         self.assertEqual(len(smoke_v2_assets["dataset"]), 5)
+        self.assertEqual(len(smoke_v3_assets["dataset"]), 5)
         self.assertEqual(len(pilot_assets["dataset"]), 30)
+        self.assertEqual(len(pilot_v2_assets["dataset"]), 30)
 
         for candidate, baseline in (
             (smoke, mini_smoke),
             (smoke_v2, mini_smoke),
+            (smoke_v3, mini_smoke),
             (pilot, mini_pilot),
+            (pilot_v2, mini_pilot),
         ):
             for key in (
                 "dataset_path",
@@ -273,8 +313,8 @@ class GeminiCampaignTests(unittest.TestCase):
         self.assertNotIn("tools", body)
         self.assertNotIn("previous_interaction_id", body)
 
-        smoke_report = readiness_report(SMOKE_CONFIG_PATH, REPO_ROOT)
-        pilot_report = readiness_report(PILOT_CONFIG_PATH, REPO_ROOT)
+        smoke_report = readiness_report(SMOKE_V3_CONFIG_PATH, REPO_ROOT)
+        pilot_report = readiness_report(PILOT_V2_CONFIG_PATH, REPO_ROOT)
         self.assertEqual(smoke_report["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION")
         self.assertEqual(smoke_report["record_count"], 5)
         self.assertEqual(pilot_report["record_count"], 30)
@@ -288,6 +328,9 @@ class GeminiCampaignTests(unittest.TestCase):
                 "thinking_level": "minimal",
                 "seed": 0,
                 "temperature": None,
+                "response_id_policy": (
+                    "required_or_omitted_only_for_exact_complete_stateless_shape"
+                ),
             },
         )
         self.assertEqual(
@@ -321,9 +364,65 @@ class GeminiCampaignTests(unittest.TestCase):
             read_json(SMOKE_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
         )
         self.assertIn(
+            smoke_v3["campaign_id"],
+            read_json(SMOKE_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
+        )
+        self.assertIn(
             pilot["campaign_id"],
             read_json(PILOT_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
         )
+        self.assertIn(
+            pilot_v2["campaign_id"],
+            read_json(PILOT_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
+        )
+
+    def test_v3_missing_response_id_is_audited_and_smoke_can_pass(self) -> None:
+        _, assets = load_and_validate_campaign(SMOKE_V3_CONFIG_PATH, REPO_ROOT)
+        labels_by_id = {
+            row["sample_id"]: row for row in read_jsonl(SMOKE_LABELS_PATH)
+        }
+        plans = [
+            _output(labels_by_id[record["sample_id"]]["class_label"] == "malicious")
+            for record in assets["dataset"]
+        ]
+        transport = FakeGeminiCompatibleTransport(
+            plans,
+            omit_response_id=True,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_campaign(
+                config_path=SMOKE_V3_CONFIG_PATH,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            results = read_jsonl(run_dir / "results.jsonl")
+            score_dir = score_run(
+                run_dir=run_dir,
+                labels_path=SMOKE_LABELS_PATH,
+                output_dir=None,
+                repo_root=REPO_ROOT,
+            )
+            metrics = read_json(score_dir / "metrics.json")
+            report = (score_dir / "report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(len(transport.calls), 5)
+        self.assertTrue(all(result["status"] == "success" for result in results))
+        self.assertTrue(all(result["response_id"] is None for result in results))
+        self.assertTrue(
+            all(
+                [event["type"] for event in result["security_events"]]
+                == ["provider_metadata_omission"]
+                for result in results
+            )
+        )
+        self.assertEqual(metrics["campaign_status"], "READINESS_PASS")
+        self.assertEqual(metrics["security"]["critical_events"], 0)
+        self.assertEqual(metrics["security"]["provider_metadata_omissions"], 5)
+        self.assertIn("diagnostyczne braki provider metadata: 5", report)
 
     def test_fatal_gemini_protocol_error_stops_v2_after_one_attempt(self) -> None:
         transport = FailingGeminiTransport()
@@ -536,7 +635,7 @@ class GeminiCampaignTests(unittest.TestCase):
                     validate_outgoing_request(config, changed)
 
     def test_fake_pilot_scores_cost_and_cross_provider_comparison(self) -> None:
-        config, assets = load_and_validate_campaign(PILOT_CONFIG_PATH, REPO_ROOT)
+        config, assets = load_and_validate_campaign(PILOT_V2_CONFIG_PATH, REPO_ROOT)
         labels_by_id = {
             row["sample_id"]: row for row in read_jsonl(PILOT_LABELS_PATH)
         }
@@ -550,12 +649,13 @@ class GeminiCampaignTests(unittest.TestCase):
             ]
 
         gemini_transport = FakeGeminiCompatibleTransport(
-            plans_for(assets["dataset"])
+            plans_for(assets["dataset"]),
+            omit_response_id=True,
         )
         with tempfile.TemporaryDirectory() as temporary:
             output_root = Path(temporary) / "runs"
             gemini_run = run_campaign(
-                config_path=PILOT_CONFIG_PATH,
+                config_path=PILOT_V2_CONFIG_PATH,
                 repo_root=REPO_ROOT,
                 output_root=output_root,
                 api_key=FAKE_KEY,
@@ -602,6 +702,7 @@ class GeminiCampaignTests(unittest.TestCase):
         self.assertEqual(len(gemini_transport.calls), 30)
         self.assertEqual(len(gemini_results), 30)
         self.assertTrue(all(row["status"] == "success" for row in gemini_results))
+        self.assertTrue(all(row["response_id"] is None for row in gemini_results))
         self.assertTrue(
             all(
                 row["resolved_model"] == "gemini-3.5-flash-lite"
@@ -609,6 +710,10 @@ class GeminiCampaignTests(unittest.TestCase):
             )
         )
         self.assertEqual(gemini_metrics["campaign_status"], "PILOT_READY_FOR_SELECTION")
+        self.assertEqual(
+            gemini_metrics["failures"]["provider_metadata_omissions"],
+            30,
+        )
         self.assertEqual(
             gemini_metrics["confusion_matrix"],
             {

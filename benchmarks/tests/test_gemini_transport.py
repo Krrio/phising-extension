@@ -72,9 +72,12 @@ def _interaction(
         }
     return {
         "id": "int_synthetic",
+        "created": "2026-08-29T12:00:00Z",
         "model": MODEL,
+        "object": "interaction",
         "status": status,
         "steps": steps,
+        "updated": "2026-08-29T12:00:01Z",
         "usage": usage,
     }
 
@@ -232,9 +235,79 @@ class GeminiTransportTests(unittest.TestCase):
                 self.assertFalse(captured.exception.retryable)
                 self.assertEqual(captured.exception.status_code, 200)
                 self.assertIn(
-                    "known_keys=id,model,status,steps,usage",
+                    "known_keys=created,id,model,object,status,steps,updated,usage",
                     str(captured.exception),
                 )
+
+    def test_exact_complete_stateless_response_may_omit_id(self) -> None:
+        value = _interaction()
+        del value["id"]
+        transport = _transport()
+        transport._opener.open = lambda *args, **kwargs: _Response(value)  # type: ignore[method-assign]
+
+        response = transport.call(
+            api_key=FAKE_KEY,
+            endpoint=GEMINI_INTERACTIONS_ENDPOINT,
+            body={"model": MODEL, "store": False},
+            timeout_seconds=1,
+        )
+
+        self.assertIsNone(response.response_id)
+        self.assertEqual(response.resolved_model, MODEL)
+        self.assertEqual(response.content, '{"verdict":"safe"}')
+        self.assertGreater(response.usage["total_tokens"], 0)
+
+    def test_missing_id_fails_outside_exact_complete_stateless_shape(self) -> None:
+        cases: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+
+        stateful = _interaction()
+        del stateful["id"]
+        cases.append(("stateful", stateful, {"model": MODEL, "store": True}))
+
+        incomplete_shape = _interaction()
+        del incomplete_shape["id"]
+        del incomplete_shape["updated"]
+        cases.append(
+            ("incomplete_shape", incomplete_shape, {"model": MODEL, "store": False})
+        )
+
+        invalid_id = _interaction()
+        invalid_id["id"] = None
+        cases.append(("invalid_id", invalid_id, {"model": MODEL, "store": False}))
+
+        for name, value, body in cases:
+            with self.subTest(name=name):
+                transport = _transport()
+                transport._opener.open = lambda *args, **kwargs: _Response(value)  # type: ignore[method-assign]
+                with self.assertRaises(ProviderError) as captured:
+                    transport.call(
+                        api_key=FAKE_KEY,
+                        endpoint=GEMINI_INTERACTIONS_ENDPOINT,
+                        body=body,
+                        timeout_seconds=1,
+                    )
+                self.assertEqual(
+                    captured.exception.kind,
+                    "invalid_provider_response",
+                )
+                self.assertFalse(captured.exception.retryable)
+
+    def test_invalid_interaction_object_fails_closed(self) -> None:
+        value = _interaction()
+        value["object"] = "unexpected"
+        transport = _transport()
+        transport._opener.open = lambda *args, **kwargs: _Response(value)  # type: ignore[method-assign]
+
+        with self.assertRaises(ProviderError) as captured:
+            transport.call(
+                api_key=FAKE_KEY,
+                endpoint=GEMINI_INTERACTIONS_ENDPOINT,
+                body={"model": MODEL, "store": False},
+                timeout_seconds=1,
+            )
+
+        self.assertEqual(captured.exception.kind, "invalid_provider_response")
+        self.assertIn("response object", str(captured.exception))
 
     def test_missing_id_reports_only_a_safe_structural_fingerprint(self) -> None:
         secret_value = "provider-value-that-must-never-be-logged"

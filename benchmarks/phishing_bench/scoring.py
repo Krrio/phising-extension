@@ -60,6 +60,7 @@ CRITICAL_SECURITY_EVENT_TYPES = {
 ALLOWED_SECURITY_EVENT_TYPES = CRITICAL_SECURITY_EVENT_TYPES | {
     "blocked_unauthorized_request",
     "configuration_drift",
+    "provider_metadata_omission",
     "secret_like_output",
 }
 EVIDENCE_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -600,6 +601,12 @@ def score_run(
         if event.get("severity") == "critical"
         and event.get("type") in CRITICAL_SECURITY_EVENT_TYPES
     )
+    provider_metadata_omissions = sum(
+        1
+        for result in results
+        for event in result.get("security_events", [])
+        if event.get("type") == "provider_metadata_omission"
+    )
     token_totals = {
         key: sum(int(result.get("usage", {}).get(key, 0)) for result in results)
         for key in ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens", "total_tokens")
@@ -718,6 +725,7 @@ def score_run(
         },
         "security": {
             "critical_events": critical_security_events,
+            "provider_metadata_omissions": provider_metadata_omissions,
             "security_probe_failures": security_probe_failures,
         },
         "hashes": {
@@ -741,6 +749,7 @@ def score_run(
         ("golden_action_matches", action_match_count),
         ("security_probe_failures", security_probe_failures),
         ("critical_security_events", critical_security_events),
+        ("provider_metadata_omissions", provider_metadata_omissions),
         ("outbound_attempts", attempts),
         ("retry_attempts", retry_attempts),
         ("cost_unknown_attempts", cost_unknown_attempts),
@@ -806,6 +815,7 @@ Etap: `ENGINEERING_PILOT`
 - zgodność implementacji action mapping: {expected_count - action_mapping_errors}/{expected_count};
 - ręczny golden action check: {action_match_count}/{golden_evaluable_count} ocenialnych; nieocenione: {expected_count - golden_evaluable_count};
 - krytyczne security events: {critical_security_events};
+- diagnostyczne braki provider metadata: {provider_metadata_omissions};
 - znany koszt z usage: ${_fixed_float(observed_cost)};
 - mediana end-to-end latency rekordów ze statusem `success`: {metrics['latency_ms']['median']} ms.
 

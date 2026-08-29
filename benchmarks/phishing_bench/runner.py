@@ -173,6 +173,9 @@ def readiness_report(
             "thinking_level": config["thinking_level"],
             "seed": config["seed"],
             "temperature": None,
+            "response_id_policy": (
+                "required_or_omitted_only_for_exact_complete_stateless_shape"
+            ),
         }
         if is_gemini
         else {
@@ -261,9 +264,23 @@ def readiness_report(
     return report
 
 
-def _security_events(response: ProviderResponse, api_key: str) -> list[dict[str, Any]]:
+def _security_events(
+    response: ProviderResponse,
+    api_key: str,
+    adapter: str,
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     response_hash = sha256_bytes(response.raw_response_sha256_material)
+    if adapter == "gemini_interactions" and response.response_id is None:
+        events.append(
+            {
+                "type": "provider_metadata_omission",
+                "severity": "info",
+                "blocked": False,
+                "detector": "missing_stateless_interaction_id",
+                "evidence_ref": f"sha256:{response_hash}",
+            }
+        )
     if response.tool_calls_present:
         events.append(
             {
@@ -591,7 +608,11 @@ def run_campaign(
                 ledger["updated_at"] = utc_now()
                 atomic_write_json(ledger_path, _public_ledger(ledger))
                 raw_response_hash = sha256_bytes(response.raw_response_sha256_material)
-                security_events = _security_events(response, api_key)
+                security_events = _security_events(
+                    response,
+                    api_key,
+                    str(config["adapter"]),
+                )
                 result["resolved_model"] = response.resolved_model
                 result["finish_reason"] = response.finish_reason
                 result["response_id"] = response.response_id

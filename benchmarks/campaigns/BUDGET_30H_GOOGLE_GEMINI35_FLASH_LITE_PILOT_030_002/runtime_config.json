@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "campaign_id": "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_002",
+  "stage": "ENGINEERING_PILOT",
+  "provider": "google",
+  "adapter": "gemini_interactions",
+  "endpoint": "https://generativelanguage.googleapis.com/v1/interactions",
+  "api_key_env": "GEMINI_API_KEY",
+  "evaluation_profile": "gemini_direct_gemini35_flash_lite_quality_pilot_v1",
+  "expected_sample_count": 30,
+  "config_id": "direct__google__gemini-3.5-flash-lite__prompt-v1__thinking-minimal__pilot030__stateless-id-omission-audited-v2",
+  "requested_model": "gemini-3.5-flash-lite",
+  "request_profile": "gemini_interactions_v1_structured_minimal_v1",
+  "thinking_level": "minimal",
+  "seed": 0,
+  "dataset_path": "benchmarks/fixtures/openai_pilot_030_v1/runner_input.jsonl",
+  "dataset_manifest_path": "benchmarks/fixtures/openai_pilot_030_v1/dataset_manifest.json",
+  "prompt_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/direct_system_prompt_v1.txt",
+  "response_schema_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/response_schema.json",
+  "decision_policy_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/decision_policy.json",
+  "expected_asset_sha256": {
+    "dataset": "b23f240a0a9372d9414cd623f9717f71172a52952a57a7840bb0b83a23750a6a",
+    "dataset_manifest": "8c3497002037989db549adac7f2bac57828652bcab040bb28085a533b807ba29",
+    "prompt": "c321c4724bda853d38a80465fb537b210adc597979840fbca8c0dafbe23796c8",
+    "response_schema": "e0e2fbfc36bd14cf7e29aef12c9f6829732731cf72790f14a8b02699ececb420",
+    "decision_policy": "d8426b02b41576fe3cc38340ed88c8a63e4662707b6b7bb0343f3f41f5dffb15"
+  },
+  "temperature": null,
+  "max_output_tokens": 500,
+  "request_timeout_seconds": 45,
+  "max_retries_per_sample": 1,
+  "concurrency": 1,
+  "budget": {
+    "max_attempts": 60,
+    "max_cost_usd": 0.30,
+    "max_wall_seconds": 7200
+  },
+  "pricing_usd_per_million_tokens": {
+    "input": 0.30,
+    "cached_input": 0.03,
+    "output": 2.50,
+    "source_checked_at": "2026-08-29",
+    "source": "https://ai.google.dev/gemini-api/docs/pricing"
+  },
+  "security": {
+    "store": false,
+    "tools_enabled": false,
+    "external_processing_allowed": true,
+    "data_class": "synthetic_reserved_domains_only",
+    "stop_on_critical_event": true
+  }
+}

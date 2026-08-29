@@ -537,6 +537,12 @@ def score_quality_run(
         if event.get("severity") == "critical"
         and event.get("type") in CRITICAL_SECURITY_EVENT_TYPES
     )
+    provider_metadata_omissions = sum(
+        1
+        for result in results
+        for event in result.get("security_events", [])
+        if event.get("type") == "provider_metadata_omission"
+    )
     usage_accounting_complete = (
         cost_unknown_attempts == 0
         and all(
@@ -735,6 +741,7 @@ def score_quality_run(
             "technical_total": technical_failure_count,
             "technical_by_status": dict(sorted(technical_statuses.items())),
             "critical_security_events": critical_security_events,
+            "provider_metadata_omissions": provider_metadata_omissions,
             "security_probe_allow": security_probe_allow,
         },
         "attempts": {
@@ -775,6 +782,7 @@ def score_quality_run(
         ("records_received", len(results)),
         ("technical_failures", technical_failure_count),
         ("critical_security_events", critical_security_events),
+        ("provider_metadata_omissions", provider_metadata_omissions),
         ("security_probe_allow", security_probe_allow),
         ("tp", tp),
         ("fp", fp),
@@ -845,6 +853,7 @@ Run: `{manifest.get('run_id')}`
 - bramki jakości: {'PASS' if acceptance_pass else 'HOLD'}; malicious `allow`: {fn}/2 max; benign `warn|hide`: {fp}/3 max; benign `hide`: {action_by_class['benign'].get('hide', 0)}/0 max;
 - security probe `allow`: {security_probe_allow};
 - krytyczne security events: {critical_security_events};
+- diagnostyczne braki provider metadata: {provider_metadata_omissions};
 - koszt zaobserwowany: ${_fixed_float(observed_cost)};
 - latency `success` min/mediana/IQR/max: {metrics['latency_ms']['min']}/{metrics['latency_ms']['median']}/{metrics['latency_ms']['iqr']}/{metrics['latency_ms']['max']} ms.
 

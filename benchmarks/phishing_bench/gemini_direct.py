@@ -32,6 +32,15 @@ INTERACTION_STATUSES = {
     "cancelled",
     "incomplete",
 }
+STATELESS_INTERACTION_KEYS_WITHOUT_ID = {
+    "created",
+    "model",
+    "object",
+    "status",
+    "steps",
+    "updated",
+    "usage",
+}
 KNOWN_TOP_LEVEL_RESPONSE_KEYS = {
     "background",
     "categories",
@@ -379,11 +388,12 @@ class GeminiInteractionsTransport:
 
         response_id = data.get("id")
         resolved_model = data.get("model")
+        object_type = data.get("object")
         status = data.get("status")
-        if not isinstance(response_id, str) or not response_id:
+        if object_type != "interaction":
             raise ProviderError(
                 "invalid_provider_response",
-                "Gemini response id is missing or invalid; "
+                "Gemini response object is missing or invalid; "
                 + _safe_top_level_shape(data),
                 status_code=response_status,
                 retryable=False,
@@ -402,6 +412,41 @@ class GeminiInteractionsTransport:
             raise ProviderError(
                 "invalid_provider_response",
                 "Gemini response status is missing or invalid; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+        for timestamp_field in ("created", "updated"):
+            timestamp = data.get(timestamp_field)
+            if not isinstance(timestamp, str) or not timestamp:
+                raise ProviderError(
+                    "invalid_provider_response",
+                    f"Gemini response {timestamp_field} is missing or invalid; "
+                    + _safe_top_level_shape(data),
+                    status_code=response_status,
+                    retryable=False,
+                    response_headers=headers,
+                )
+
+        if "id" in data:
+            if not isinstance(response_id, str) or not response_id:
+                raise ProviderError(
+                    "invalid_provider_response",
+                    "Gemini response id is invalid; "
+                    + _safe_top_level_shape(data),
+                    status_code=response_status,
+                    retryable=False,
+                    response_headers=headers,
+                )
+        elif not (
+            body.get("store") is False
+            and set(data) == STATELESS_INTERACTION_KEYS_WITHOUT_ID
+        ):
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini response id is missing outside the frozen complete "
+                "stateless response shape; "
                 + _safe_top_level_shape(data),
                 status_code=response_status,
                 retryable=False,
