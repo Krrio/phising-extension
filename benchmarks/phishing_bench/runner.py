@@ -13,7 +13,7 @@ from typing import Any, Callable
 from . import __version__
 from .contracts import (
     ContractError,
-    GPT54_NANO_PROFILES,
+    GPT54_PROFILES,
     QUALITY_PROFILES,
     action_for_output,
     build_chat_request,
@@ -167,12 +167,12 @@ def readiness_report(
             ),
             "instruction_role": (
                 "developer"
-                if evaluation_profile in GPT54_NANO_PROFILES
+                if evaluation_profile in GPT54_PROFILES
                 else "system"
             ),
             "token_limit_field": (
                 "max_completion_tokens"
-                if evaluation_profile in GPT54_NANO_PROFILES
+                if evaluation_profile in GPT54_PROFILES
                 else "max_tokens"
             ),
             "reasoning_effort": config.get("reasoning_effort"),

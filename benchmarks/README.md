@@ -14,7 +14,17 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe i wykonane są dwa tory, każdy ze smoke `n=5` i pilotem jakości `n=30`: OpenAI Direct oraz CrewAI Offline. Oba piloty zakończyły się technicznie poprawnie, zostały policzone i mają status `PILOT_HOLD`. Trzeci tor, OpenAI Direct z przypiętym `gpt-5.4-nano-2026-03-17`, jest zaimplementowany i lokalnie zweryfikowany, ale czeka na pierwszy live smoke. Jest też wspólny, całkowicie offline exporter `compare`, który sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
+Gotowe, wykonane i policzone są trzy tory: bazowy OpenAI Direct, CrewAI Offline oraz OpenAI Direct z przypiętym `gpt-5.4-nano-2026-03-17`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Czwarty tor, OpenAI Direct `gpt-5.4-mini-2026-03-17`, jest zamrożony i lokalnie zweryfikowany, ale nie wykonał jeszcze żadnego płatnego requestu. Wspólny, całkowicie offline exporter `compare` sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
+
+Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
+
+| Wariant | TP / FP / TN / FN | F1 | FPR | Koszt observed | Mediana latency | Status |
+|---|---:|---:|---:|---:|---:|---|
+| Direct `gpt-4o-mini-2024-07-18` | 15 / 3 / 12 / 0 | 0,909091 | 0,200000 | 0,00773385 USD | 2291,351 ms | `PILOT_HOLD` |
+| CrewAI Offline, ten sam model | 15 / 7 / 8 / 0 | 0,810811 | 0,466667 | 0,02364090 USD | 6981,653 ms | `PILOT_HOLD` |
+| Direct `gpt-5.4-nano-2026-03-17` | 15 / 11 / 4 / 0 | 0,731707 | 0,733333 | 0,00964995 USD | 1314,905 ms | `PILOT_HOLD` |
+
+Wszystkie trzy warianty miały recall `1,0`, ale mały, challenge-enriched pilot nie pozwala ogłosić zwycięzcy ani gotowości produkcyjnej. Nano było najszybsze, lecz nie przeszło bramki false positives: 11/15 benign dostało `warn` lub `hide`, w tym dwa `hide`.
 
 ```text
 5 syntetycznych runner inputs
@@ -66,6 +76,8 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_OPENAI_PILOT_030_001/` | właściwa kampania pilota z limitem 60 attempts / 0,25 USD / 2 h |
 | `campaigns/BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001/` | challenger GPT-5.4 nano: smoke 5, reasoning `none`, aktualny kontrakt Chat Completions |
 | `campaigns/BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001/` | ten sam zestaw 30 co baseline, limit 60 attempts / 0,25 USD / 2 h |
+| `campaigns/BUDGET_30H_OPENAI_GPT54_MINI_SMOKE_001/` | challenger GPT-5.4 Mini: smoke 5, przypięty snapshot, reasoning `none`, limit 0,10 USD |
+| `campaigns/BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001/` | ten sam zestaw 30 co pozostałe Direct, limit 60 attempts / 0,65 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
@@ -76,6 +88,7 @@ Najważniejsze pliki:
 | `tests/test_crewai_offline.py` | pełny kickoff CrewAI z zamockowaną wyłącznie granicą providera oraz testy telemetrii, egressu i budżetu |
 | `tests/test_comparison.py` | porównania sparowane, wykrywanie manipulacji i bezpieczny eksport CSV |
 | `tests/test_gpt54_nano_campaign.py` | drift modelu/requestu/cen oraz pełny mockowany run i scoring GPT-5.4 nano |
+| `tests/test_gpt54_mini_campaign.py` | drift, budżet, pełny mockowany pilot/scoring i porównanie Mini–Nano |
 
 Tor Direct używa wyłącznie biblioteki standardowej Pythona i nie ma niewidocznych retry SDK. Tor CrewAI działa w przypiętym środowisku backendu (`crewai==1.15.8`), ale wymusza `max_retries=0`, trzy calls na workflow, dokładny Chat Completions endpoint i `store=false`. Oba tory blokują egress poza `api.openai.com`, ignorują proxy, nie pobierają URL-i z wiadomości i odmawiają live runu przy aktywnym `SSLKEYLOGFILE`. CrewAI ma dodatkowo wyłączone anonimowe OTLP telemetry, tracking oraz first-run tracing przed pierwszym importem frameworka.
 
@@ -314,87 +327,94 @@ backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
 
 Właściwy live pilot miał limit 90 calls, 0,25 USD i 2 godziny; konserwatywna rezerwacja z marginesem wynosiła około 0,1589 USD. Scoring korzysta z `benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl`. Zachowaj istniejący run — nowy campaign ID jest wymagany dla każdego świadomego powtórzenia lub zmiany konfiguracji.
 
-## Challenger OpenAI Direct: GPT-5.4 nano
+## Challenger OpenAI Direct: GPT-5.4 nano — wykonany
 
-Ten tor izoluje możliwie małą zmianę względem bazowego Direct: używa dokładnie tych samych runner inputs, treści promptu, strict JSON Schema i decision policy, ale przypina snapshot `gpt-5.4-nano-2026-03-17`. Pozostaje na Chat Completions, aby nie mieszać zmiany modelu ze zmianą endpointu. Kontrakt właściwy dla GPT-5.4 używa roli `developer`, `max_completion_tokens`, `reasoning_effort="none"`, `temperature=0`, `store=false`, bez tools i z jednym wyborem odpowiedzi. Ta adaptacja API jest jawnie zapisywana w readiness i eksportach porównawczych.
+Ten tor zachował te same runner inputs, prompt, strict JSON Schema i decision policy, ale przypiął snapshot `gpt-5.4-nano-2026-03-17`. Pozostał na Chat Completions, z rolą `developer`, `max_completion_tokens`, `reasoning_effort="none"`, `temperature=0`, `store=false`, bez tools i z jednym wyborem odpowiedzi.
 
-### 1. Lokalne testy, readiness i dry-run smoke — 0 USD
+Smoke zakończył się `READINESS_PASS`: 5/5 `success`, 5/5 strict schema, 5/5 golden actions, zero błędów, retry i security events, koszt 0,00192406 USD, mediana 1825,607 ms. Pilot miał 30/30 `success`, ale zakończył się `PILOT_HOLD`: `TP=15, FP=11, TN=4, FN=0`, F1 `0,731707`, FPR `0,733333`, koszt 0,00964995 USD i mediana 1314,905 ms. Nie uruchamiaj tych campaign IDs ponownie; słaby wynik jakości jest wynikiem eksperymentu, nie powodem do rerunu.
+
+## Następny challenger: GPT-5.4 Mini
+
+Kampania przypina `gpt-5.4-mini-2026-03-17`. Jest to mocniejszy tier tej samej rodziny i ma dokładnie ten sam request profile co Nano, więc porównanie Mini–Nano izoluje zmianę modelu lepiej niż przejście na alias bez datowanego snapshotu. Zamrożona cena z 28 sierpnia 2026 to 0,75 USD/M input, 0,075 USD/M cached input i 4,50 USD/M output.
+
+### 1. Testy, readiness i dry-run Mini — 0 USD
 
 ```bash
-GPT54_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001/runtime_config.json"
+MINI_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_OPENAI_GPT54_MINI_SMOKE_001/runtime_config.json"
 
-python3 -m unittest discover -s benchmarks/tests -v
+env -u OPENAI_API_KEY PYTHONWARNINGS=ignore \
+  backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -v
 
-python3 benchmarks/benchmark_cli.py validate \
-  --campaign "$GPT54_SMOKE_CONFIG"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
+  --campaign "$MINI_SMOKE_CONFIG"
 
-python3 benchmarks/benchmark_cli.py run \
-  --campaign "$GPT54_SMOKE_CONFIG"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$MINI_SMOKE_CONFIG"
 ```
 
-Oczekiwane są: `READY_FOR_MANUAL_LIVE_CONFIRMATION`, pięć rekordów, model `gpt-5.4-nano-2026-03-17`, `instruction_role=developer`, `token_limit_field=max_completion_tokens`, `reasoning_effort=none`, najwyżej 10 attempts i cap 0,05 USD. Konserwatywna rezerwacja pełnego smoke wynosi obecnie około 0,02334 USD. Dry-run nie wymaga klucza i nie wykonuje requestów.
+Oczekiwane są: `READY_FOR_MANUAL_LIVE_CONFIRMATION`, 5 rekordów, `gpt-5.4-mini-2026-03-17`, rola `developer`, `max_completion_tokens`, reasoning `none`, maksymalnie 10 attempts i zero provider calls w dry-run. Konserwatywna rezerwacja pełnego smoke wynosi `0,0865905 USD`, a twardy cap `0,10 USD`. Gdyby usage było identyczne jak w wykonanym smoke Nano, szacowany koszt Mini wyniósłby około `0,00708285 USD`; to tylko prognoza, rozstrzyga usage i dashboard providera.
 
-### 2. Dokładnie jeden live smoke i scoring
+### 2. Dokładnie jeden live smoke Mini i scoring
 
-Najpierw commituj zamrożony harness i upewnij się, że `git status --short` nic nie wypisuje. Następnie:
+Najpierw commituj i pushuj zamrożony harness, a następnie upewnij się, że `git status --short` nic nie wypisuje. Klucza nie dodawaj do commita ani pliku:
 
 ```bash
 read -s OPENAI_API_KEY
 export OPENAI_API_KEY
 
-python3 benchmarks/benchmark_cli.py run \
-  --campaign "$GPT54_SMOKE_CONFIG" \
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$MINI_SMOKE_CONFIG" \
   --live \
-  --confirm-campaign BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001
+  --confirm-campaign BUDGET_30H_OPENAI_GPT54_MINI_SMOKE_001
 
 unset OPENAI_API_KEY
 
-GPT54_SMOKE_RUN="/absolutna/sciezka/wypisana/przez/live-run"
-python3 benchmarks/benchmark_cli.py score \
-  --run-dir "$GPT54_SMOKE_RUN" \
+MINI_SMOKE_RUN="/absolutna/sciezka/wypisana/przez/live-run"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
+  --run-dir "$MINI_SMOKE_RUN" \
   --labels benchmarks/secure_scoring/openai_smoke_v1/labels.jsonl
 
-cat "$GPT54_SMOKE_RUN/scoring/report.md"
+cat "$MINI_SMOKE_RUN/scoring/report.md"
 ```
 
-Nie uruchamiaj automatycznie drugiego smoke. Najpierw sprawdź, czy jest 5/5 terminalnych `success`, strict schema 5/5, zero retry/błędów/security events, potwierdzone usage i resolved model równy przypiętemu snapshotowi. Do pilota przechodź tylko po `READINESS_PASS` lub po świadomym przeglądzie niekrytycznego golden mismatch.
+Nie uruchamiaj automatycznie drugiego smoke. Do pilota przechodź dopiero po sprawdzeniu 5/5 terminalnych wyników, strict schema, zera błędów/retry/security events, kompletnego usage i `resolved_model` równego przypiętemu snapshotowi.
 
-### 3. Pilot GPT-5.4 nano `n=30`
+### 3. Pilot GPT-5.4 Mini `n=30` — dopiero po przejściu smoke
 
 ```bash
-GPT54_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001/runtime_config.json"
+MINI_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001/runtime_config.json"
 
-python3 benchmarks/benchmark_cli.py validate \
-  --campaign "$GPT54_PILOT_CONFIG"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
+  --campaign "$MINI_PILOT_CONFIG"
 
-python3 benchmarks/benchmark_cli.py run \
-  --campaign "$GPT54_PILOT_CONFIG"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$MINI_PILOT_CONFIG"
 ```
 
-Readiness pilota rezerwuje około 0,13885 USD na wszystkie możliwe próby, a wymagany cap z marginesem 20% wynosi około 0,16662 USD wobec twardego limitu 0,25 USD. To bezpiecznik liczony konserwatywnym proxy, nie prognoza rachunku.
+Pilot zachowuje dokładnie te same 30 próbek, prompt, schema, politykę, retry i limit 500 output tokens. Ledger rezerwuje `0,5150505 USD`, wymagany cap z marginesem 20% to `0,6180606 USD`, a twardy limit kampanii to `0,65 USD`. To celowo pesymistyczny bezpiecznik. Przy usage identycznym jak w pilocie Nano koszt Mini wyniósłby około `0,03536625 USD`.
 
-Po poprawnym smoke i ponownym upewnieniu się, że worktree jest czysty:
+Po ręcznej akceptacji smoke i sprawdzeniu czystego worktree:
 
 ```bash
 read -s OPENAI_API_KEY
 export OPENAI_API_KEY
 
-python3 benchmarks/benchmark_cli.py run \
-  --campaign "$GPT54_PILOT_CONFIG" \
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$MINI_PILOT_CONFIG" \
   --live \
-  --confirm-campaign BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001
+  --confirm-campaign BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001
 
 unset OPENAI_API_KEY
 
-GPT54_PILOT_RUN="/absolutna/sciezka/wypisana/przez/live-run"
-python3 benchmarks/benchmark_cli.py score \
-  --run-dir "$GPT54_PILOT_RUN" \
+MINI_PILOT_RUN="/absolutna/sciezka/wypisana/przez/live-run"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
+  --run-dir "$MINI_PILOT_RUN" \
   --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl
 
-cat "$GPT54_PILOT_RUN/scoring/report.md"
+cat "$MINI_PILOT_RUN/scoring/report.md"
 ```
 
-Pilot ma dokładnie te same 30 próbek i labele co dotychczasowy Direct oraz CrewAI Offline. Dzięki temu po scoringu można go bez dodatkowych calls dodać jako trzeci wariant do `compare`. Wynik nadal jest opisowy i `INCONCLUSIVE`; `n=30` nie wystarcza do deklaracji przewagi ani gotowości produkcyjnej.
+Pilot jest screeningiem opisowym. Nie tunuj promptu ani polityki na tych samych 30 rekordach i nie powtarzaj runu po słabym wyniku; każda świadoma zmiana wymaga nowego campaign ID oraz nowego zestawu do potwierdzenia.
 
 ## Porównanie wielu modeli i silników — 0 USD
 
@@ -416,7 +436,9 @@ python3 benchmarks/benchmark_cli.py compare \
 cat "$COMPARE_DIR/report.md"
 ```
 
-Wynik bieżącej pary jest opisowy: Direct ma `TP=15, FP=3, TN=12, FN=0`, a CrewAI `TP=15, FP=7, TN=8, FN=0`. CrewAI względem Direct ma `ΔF1=-0,098280`, `ΔFPR=+0,266667`, koszt `×3,056809` i medianę latency `×3,046959`. Sparowane wyniki to: oba poprawne `23`, tylko Direct `4`, tylko CrewAI `0`, oba błędne `3`; exact action agreement `24/30`. To nadal `INCONCLUSIVE`, a nie deklaracja zwycięzcy.
+Wykonany eksport trzywariantowy pozostaje opisowy. CrewAI względem Direct ma `ΔF1=-0,098280`, `ΔFPR=+0,266667`, koszt `×3,056809` i medianę latency `×3,046959`; poprawne tylko po stronie Direct były 4 przypadki, tylko po stronie CrewAI 0. GPT-5.4 Nano względem Direct ma `ΔF1=-0,177384`, `ΔFPR=+0,533333`, koszt `×1,247755` i medianę latency `×0,573856`; poprawne tylko po stronie Direct było 8 przypadków, tylko po stronie Nano 0. To nadal `INCONCLUSIVE`, a nie deklaracja zwycięzcy.
+
+Po wykonaniu i policzeniu Mini dodaj do nowego eksportu czwarty wariant `--run "gpt54_mini=$MINI_PILOT_RUN"`. Nie nadpisuj istniejącego katalogu `THREE_WAY_PILOT_030_001`; użyj nowej nazwy, na przykład `FOUR_WAY_PILOT_030_001`.
 
 Nie mieszaj dwóch osi eksperymentu. OpenAI, Google, Cohere, Mistral i Anthropic to modele/providerzy. CrewAI jest architekturą orkiestracji, nie kolejnym modelem. Pierwsza macierz cross-provider powinna używać jednego direct calla na mail oraz tego samego promptu, schematu i polityki. CrewAI pozostaje osobnym punktem `architecture=crew`.
 
@@ -489,13 +511,14 @@ Statusy końcowe:
 
 ## Zaktualizowana kolejność dalszych prac
 
-1. Direct i CrewAI Offline smoke oraz pilot `n=30` są ukończone. Zachować runy bez rerunów. Oba są technicznie poprawne, oba mają `PILOT_HOLD`, a porównanie pozostaje `INCONCLUSIVE`.
-2. Wygenerować i archiwizować wspólny eksport `compare`. Bieżący Direct–CrewAI jest `system_bundle_delta`, ponieważ różnią się prompt, orkiestracja i frozen evidence.
-3. Challenger Direct `gpt-5.4-nano-2026-03-17` jest zamrożony i lokalnie zweryfikowany. Wykonać jeden smoke `n=5`; dopiero po jego przejściu jeden pilot `n=30`, bez automatycznych rerunów.
-4. Po policzeniu GPT-5.4 nano wygenerować trzywariantowy eksport. Następnie dodać maksymalnie 2–3 tanie direct adapters innych providerów. Kolejność budżetowa do ponownej weryfikacji tuż przed zamrożeniem kampanii: Cohere `command-r7b-12-2024`, Google `gemini-2.5-flash-lite`, Mistral `mistral-small-2603`; Anthropic Haiku jest opcjonalnym droższym punktem referencyjnym.
-5. Screening: jeden smoke `n=5`, a po przejściu bramki jeden pilot `n=30` na provider. Nie uruchamiać CrewAI dla każdego modelu — zaciera to koszt i wpływ samego silnika.
-6. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
-7. `n=30` służy do screeningu i debugowania, `n=100` do ostrożnego confirmation. Żaden wynik syntetyczny sam w sobie nie dowodzi gotowości produkcyjnej; później potrzebny jest osobny, zanonimizowany i zgodnie dopuszczony zestaw z rzeczywistego rozkładu ruchu.
+1. Direct, CrewAI Offline i GPT-5.4 Nano mają ukończone smoke oraz pilot `n=30`. Zachować runy i eksport trzywariantowy bez rerunów; wszystkie wyniki pozostają `INCONCLUSIVE`.
+2. Commitnąć i pushnąć zamrożoną kampanię GPT-5.4 Mini, wykonać dokładnie jeden smoke `n=5` i policzyć go offline.
+3. Tylko po technicznym przejściu smoke wykonać jeden pilot Mini `n=30`, bez strojenia na widzianym zestawie i bez automatycznego rerunu.
+4. Po scoringu Mini utworzyć nowy eksport czterowariantowy. Porównanie Nano–Mini ma ten sam request profile i najlepiej izoluje zmianę tieru modelu; porównanie zawierające CrewAI pozostaje `system_bundle_delta`.
+5. Następnie dodać maksymalnie 2–3 tanie direct adapters innych providerów. Dokładne modele, snapshoty i ceny ponownie zweryfikować tuż przed zamrożeniem każdego campaign ID.
+6. Screening: jeden smoke `n=5`, a po przejściu bramki jeden pilot `n=30` na provider. Nie uruchamiać CrewAI dla każdego modelu — zaciera to koszt i wpływ samego silnika.
+7. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
+8. `n=30` służy do screeningu i debugowania, `n=100` do ostrożnego confirmation. Żaden wynik syntetyczny sam w sobie nie dowodzi gotowości produkcyjnej; później potrzebny jest osobny, zanonimizowany i zgodnie dopuszczony zestaw z rzeczywistego rozkładu ruchu.
 
 Przy limicie 30 godzin rozsądny zakres to: istniejące 2 piloty zachować, dodać 2–3 challengery po `5+30` próbek, a następnie wykonać `2 × 100` blind confirmation tylko dla finalistów. To daje informację o wielu silnikach bez marnowania budżetu na 100–200 maili dla każdego słabego wariantu.
 
@@ -507,6 +530,8 @@ Budowa harnessu, danych i anotacji jest przygotowaniem przed startem 30-godzinne
 
 - OpenAI, [GPT-4o mini — snapshot, endpoints, Structured Outputs i cena](https://developers.openai.com/api/docs/models/gpt-4o-mini)
 - OpenAI, [GPT-5.4 nano — snapshot, Structured Outputs i cena](https://developers.openai.com/api/docs/models/gpt-5.4-nano)
+- OpenAI, [GPT-5.4 Mini — snapshot, Structured Outputs i cena](https://developers.openai.com/api/docs/models/gpt-5.4-mini)
+- OpenAI, [aktualny wybór modeli](https://developers.openai.com/api/docs/models) i [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
 - OpenAI, [praktyki projektowania evali](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
 - OpenAI, [Chat Completions API](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions)
 - OpenAI, [kontrola danych API](https://developers.openai.com/api/docs/guides/your-data)
