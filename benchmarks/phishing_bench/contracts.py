@@ -11,6 +11,7 @@ from .io_utils import canonical_json, read_json, read_jsonl, sha256_file, sha256
 
 
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+GEMINI_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1/interactions"
 SMOKE_PROFILE = "openai_direct_smoke_v1"
 QUALITY_PILOT_PROFILE = "openai_direct_quality_pilot_v1"
 GPT54_NANO_SMOKE_PROFILE = "openai_direct_gpt54_nano_smoke_v1"
@@ -21,12 +22,21 @@ GPT54_MINI_SMOKE_PROFILE = "openai_direct_gpt54_mini_smoke_v1"
 GPT54_MINI_QUALITY_PILOT_PROFILE = (
     "openai_direct_gpt54_mini_quality_pilot_v1"
 )
+GEMINI35_FLASH_LITE_SMOKE_PROFILE = (
+    "gemini_direct_gemini35_flash_lite_smoke_v1"
+)
+GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE = (
+    "gemini_direct_gemini35_flash_lite_quality_pilot_v1"
+)
 CREWAI_SMOKE_PROFILE = "crewai_offline_smoke_v1"
 CREWAI_QUALITY_PILOT_PROFILE = "crewai_offline_quality_pilot_v1"
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"
 # Kept as a public alias for compatibility with the already frozen nano tests/runs.
 GPT54_NANO_REQUEST_PROFILE = GPT54_REASONING_NONE_REQUEST_PROFILE
 GPT54_MINI_REQUEST_PROFILE = GPT54_REASONING_NONE_REQUEST_PROFILE
+GEMINI_INTERACTIONS_REQUEST_PROFILE = (
+    "gemini_interactions_v1_structured_minimal_v1"
+)
 GPT54_NANO_PROFILES = {
     GPT54_NANO_SMOKE_PROFILE,
     GPT54_NANO_QUALITY_PILOT_PROFILE,
@@ -36,15 +46,21 @@ GPT54_MINI_PROFILES = {
     GPT54_MINI_QUALITY_PILOT_PROFILE,
 }
 GPT54_PROFILES = GPT54_NANO_PROFILES | GPT54_MINI_PROFILES
+GEMINI_PROFILES = {
+    GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+    GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
+}
 DIRECT_SMOKE_PROFILES = {
     SMOKE_PROFILE,
     GPT54_NANO_SMOKE_PROFILE,
     GPT54_MINI_SMOKE_PROFILE,
+    GEMINI35_FLASH_LITE_SMOKE_PROFILE,
 }
 QUALITY_PROFILES = {
     QUALITY_PILOT_PROFILE,
     GPT54_NANO_QUALITY_PILOT_PROFILE,
     GPT54_MINI_QUALITY_PILOT_PROFILE,
+    GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
     CREWAI_QUALITY_PILOT_PROFILE,
 }
 CREWAI_PROFILES = {CREWAI_SMOKE_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
@@ -213,6 +229,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     is_gpt54_nano = evaluation_profile in GPT54_NANO_PROFILES
     is_gpt54_mini = evaluation_profile in GPT54_MINI_PROFILES
     is_gpt54 = evaluation_profile in GPT54_PROFILES
+    is_gemini = evaluation_profile in GEMINI_PROFILES
     if is_quality:
         required |= {
             "evaluation_profile",
@@ -223,12 +240,15 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         CREWAI_SMOKE_PROFILE,
         GPT54_NANO_SMOKE_PROFILE,
         GPT54_MINI_SMOKE_PROFILE,
+        GEMINI35_FLASH_LITE_SMOKE_PROFILE,
     }:
         required |= {"evaluation_profile", "expected_sample_count"}
     elif evaluation_profile != SMOKE_PROFILE:
         raise ContractError(f"unsupported evaluation_profile: {evaluation_profile}")
     if is_gpt54:
         required |= {"request_profile", "reasoning_effort"}
+    if is_gemini:
+        required |= {"request_profile", "thinking_level", "seed"}
     if is_crewai:
         required |= {
             "crewai_version",
@@ -244,45 +264,93 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     assert_no_label_keys(config)
     if config["schema_version"] != "1.0" or config["stage"] != "ENGINEERING_PILOT":
         raise ContractError("unsupported runtime config version or stage")
-    expected_adapter = "crewai_sequential_offline" if is_crewai else "chat_completions"
-    if config["provider"] != "openai" or config["adapter"] != expected_adapter:
-        raise ContractError("provider/adapter differs from the frozen evaluation profile")
-    if config["endpoint"] != OPENAI_CHAT_COMPLETIONS_ENDPOINT:
-        raise ContractError("endpoint is not the pinned OpenAI Chat Completions endpoint")
-    parsed_endpoint = urlparse(config["endpoint"])
-    if (parsed_endpoint.scheme, parsed_endpoint.hostname, parsed_endpoint.path) != (
-        "https",
-        "api.openai.com",
-        "/v1/chat/completions",
+    expected_provider = "google" if is_gemini else "openai"
+    expected_adapter = (
+        "gemini_interactions"
+        if is_gemini
+        else "crewai_sequential_offline"
+        if is_crewai
+        else "chat_completions"
+    )
+    if (
+        config["provider"] != expected_provider
+        or config["adapter"] != expected_adapter
     ):
+        raise ContractError("provider/adapter differs from the frozen evaluation profile")
+    expected_endpoint = (
+        GEMINI_INTERACTIONS_ENDPOINT
+        if is_gemini
+        else OPENAI_CHAT_COMPLETIONS_ENDPOINT
+    )
+    if config["endpoint"] != expected_endpoint:
+        raise ContractError("endpoint differs from the frozen evaluation profile")
+    parsed_endpoint = urlparse(config["endpoint"])
+    expected_endpoint_parts = (
+        ("https", "generativelanguage.googleapis.com", "/v1/interactions")
+        if is_gemini
+        else ("https", "api.openai.com", "/v1/chat/completions")
+    )
+    if (
+        parsed_endpoint.scheme,
+        parsed_endpoint.hostname,
+        parsed_endpoint.path,
+    ) != expected_endpoint_parts or parsed_endpoint.query or parsed_endpoint.fragment:
         raise ContractError("endpoint failed the egress allowlist")
     model = config["requested_model"]
-    if not isinstance(model, str) or not re.search(r"-20\d{2}-\d{2}-\d{2}$", model):
-        raise ContractError("requested_model must be an exact dated snapshot, never an alias/latest")
+    if not isinstance(model, str):
+        raise ContractError("requested_model must be a string")
+    if is_gemini:
+        if model != "gemini-3.5-flash-lite" or any(
+            marker in model for marker in ("latest", "preview", "experimental")
+        ):
+            raise ContractError(
+                "Gemini requested_model must be the frozen stable model ID"
+            )
+    elif not re.search(r"-20\d{2}-\d{2}-\d{2}$", model):
+        raise ContractError(
+            "requested_model must be an exact dated snapshot, never an alias/latest"
+        )
     expected_model = {
         GPT54_NANO_SMOKE_PROFILE: "gpt-5.4-nano-2026-03-17",
         GPT54_NANO_QUALITY_PILOT_PROFILE: "gpt-5.4-nano-2026-03-17",
         GPT54_MINI_SMOKE_PROFILE: "gpt-5.4-mini-2026-03-17",
         GPT54_MINI_QUALITY_PILOT_PROFILE: "gpt-5.4-mini-2026-03-17",
+        GEMINI35_FLASH_LITE_SMOKE_PROFILE: "gemini-3.5-flash-lite",
+        GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE: "gemini-3.5-flash-lite",
     }.get(evaluation_profile, "gpt-4o-mini-2024-07-18")
     if model != expected_model:
         raise ContractError("requested_model differs from the frozen evaluation profile")
-    if config["api_key_env"] != "OPENAI_API_KEY":
-        raise ContractError("API key must come from OPENAI_API_KEY")
+    expected_key_env = "GEMINI_API_KEY" if is_gemini else "OPENAI_API_KEY"
+    if config["api_key_env"] != expected_key_env:
+        raise ContractError(f"API key must come from {expected_key_env}")
     if (
-        isinstance(config["temperature"], bool)
-        or not isinstance(config["temperature"], (int, float))
-        or config["temperature"] != 0
+        (
+            config["temperature"] is not None
+            if is_gemini
+            else isinstance(config["temperature"], bool)
+            or not isinstance(config["temperature"], (int, float))
+            or config["temperature"] != 0
+        )
         or isinstance(config["concurrency"], bool)
         or not isinstance(config["concurrency"], int)
         or config["concurrency"] != 1
     ):
-        raise ContractError("frozen profiles require temperature=0 and concurrency=1")
+        expected_temperature = "provider default" if is_gemini else "0"
+        raise ContractError(
+            f"frozen profile requires temperature={expected_temperature} and concurrency=1"
+        )
     if is_gpt54 and (
         config["request_profile"] != GPT54_REASONING_NONE_REQUEST_PROFILE
         or config["reasoning_effort"] != "none"
     ):
         raise ContractError("GPT-5.4 request profile/reasoning drift")
+    if is_gemini and (
+        config["request_profile"] != GEMINI_INTERACTIONS_REQUEST_PROFILE
+        or config["thinking_level"] != "minimal"
+        or isinstance(config["seed"], bool)
+        or config["seed"] != 0
+    ):
+        raise ContractError("Gemini Interactions request profile drift")
     if (
         isinstance(config["max_output_tokens"], bool)
         or not isinstance(config["max_output_tokens"], int)
@@ -362,11 +430,12 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         if evaluation_profile in {
             GPT54_NANO_SMOKE_PROFILE,
             GPT54_MINI_SMOKE_PROFILE,
+            GEMINI35_FLASH_LITE_SMOKE_PROFILE,
         }:
             if config["expected_sample_count"] != 5:
-                raise ContractError("GPT-5.4 smoke requires expected_sample_count=5")
+                raise ContractError("direct challenger smoke requires expected_sample_count=5")
             if budget["max_attempts"] != 10:
-                raise ContractError("GPT-5.4 smoke requires max_attempts=10")
+                raise ContractError("direct challenger smoke requires max_attempts=10")
     elif is_quality:
         expected_sample_count = config["expected_sample_count"]
         if (
@@ -407,13 +476,15 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             or not 1 <= budget["max_wall_seconds"] <= 1800
         ):
             raise ContractError("smoke max_wall_seconds must be in 1..1800")
-        expected_smoke_cost_cap = 0.10 if is_gpt54_mini else 0.05
-        if (is_crewai or is_gpt54) and float(budget["max_cost_usd"]) != expected_smoke_cost_cap:
+        expected_smoke_cost_cap = 0.10 if (is_gpt54_mini or is_gemini) else 0.05
+        if (is_crewai or is_gpt54 or is_gemini) and float(budget["max_cost_usd"]) != expected_smoke_cost_cap:
             raise ContractError(
                 f"frozen smoke profile requires max_cost_usd={expected_smoke_cost_cap:.2f}"
             )
     else:
-        expected_quality_cost_cap = 0.65 if is_gpt54_mini else 0.25
+        expected_quality_cost_cap = (
+            0.65 if is_gpt54_mini else 0.30 if is_gemini else 0.25
+        )
         if float(budget["max_cost_usd"]) != expected_quality_cost_cap:
             raise ContractError(
                 "quality pilot requires "
@@ -465,7 +536,14 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         for key in ("input", "cached_input", "output")
     ):
         raise ContractError("invalid pricing snapshot")
-    if is_gpt54_nano:
+    if is_gemini:
+        expected_pricing = (
+            0.30,
+            0.03,
+            2.50,
+            "https://ai.google.dev/gemini-api/docs/pricing",
+        )
+    elif is_gpt54_nano:
         expected_pricing = (
             0.20,
             0.02,
@@ -492,9 +570,11 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         float(pricing["output"]),
         pricing["source"],
     ) != expected_pricing:
-        raise ContractError("pricing differs from the frozen OpenAI snapshot")
+        raise ContractError("pricing differs from the frozen provider snapshot")
     if is_gpt54 and pricing["source_checked_at"] != "2026-08-28":
         raise ContractError("GPT-5.4 pricing check date drift")
+    if is_gemini and pricing["source_checked_at"] != "2026-08-29":
+        raise ContractError("Gemini pricing check date drift")
 
     resolved: dict[str, Path] = {}
     asset_path_keys = [
@@ -565,7 +645,37 @@ def build_user_message(record: dict[str, Any]) -> str:
 def build_chat_request(
     config: dict[str, Any], record: dict[str, Any], prompt: str, response_schema: dict[str, Any]
 ) -> dict[str, Any]:
-    if config.get("evaluation_profile") in GPT54_PROFILES:
+    if config.get("evaluation_profile") in GEMINI_PROFILES:
+        schema = response_schema.get("json_schema", {}).get("schema")
+        if not isinstance(schema, dict):
+            raise ContractError("Gemini structured output requires the frozen JSON schema")
+        body = {
+            "model": config["requested_model"],
+            "input": [
+                {
+                    "type": "user_input",
+                    "content": [
+                        {"type": "text", "text": build_user_message(record)}
+                    ],
+                }
+            ],
+            "system_instruction": prompt,
+            "response_format": {
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": schema,
+            },
+            "stream": False,
+            "store": False,
+            "background": False,
+            "generation_config": {
+                "max_output_tokens": config["max_output_tokens"],
+                "seed": config["seed"],
+                "thinking_level": config["thinking_level"],
+                "thinking_summaries": "none",
+            },
+        }
+    elif config.get("evaluation_profile") in GPT54_PROFILES:
         body = {
             "model": config["requested_model"],
             "temperature": config["temperature"],
@@ -623,6 +733,81 @@ def build_crewai_workflow_contract(
 
 def validate_outgoing_request(config: dict[str, Any], body: dict[str, Any]) -> None:
     is_gpt54 = config.get("evaluation_profile") in GPT54_PROFILES
+    is_gemini = config.get("evaluation_profile") in GEMINI_PROFILES
+    if is_gemini:
+        expected_keys = {
+            "model",
+            "input",
+            "system_instruction",
+            "response_format",
+            "stream",
+            "store",
+            "background",
+            "generation_config",
+        }
+        if set(body) != expected_keys:
+            raise ContractError(
+                "outgoing Gemini request contains an unexpected capability or field"
+            )
+        if (
+            body["model"] != config["requested_model"]
+            or body["store"] is not False
+            or body["stream"] is not False
+            or body["background"] is not False
+        ):
+            raise ContractError("model/execution-mode drift in outgoing Gemini request")
+        generation = body.get("generation_config")
+        if not isinstance(generation, dict) or generation != {
+            "max_output_tokens": config["max_output_tokens"],
+            "seed": 0,
+            "thinking_level": "minimal",
+            "thinking_summaries": "none",
+        }:
+            raise ContractError("Gemini generation_config drift")
+        if "temperature" in generation:
+            raise ContractError("deprecated Gemini temperature must remain absent")
+        response_format = body.get("response_format")
+        if (
+            not isinstance(response_format, dict)
+            or response_format.get("type") != "text"
+            or response_format.get("mime_type") != "application/json"
+        ):
+            raise ContractError("Gemini structured JSON output is required")
+        schema = response_format.get("schema")
+        if not isinstance(schema, dict) or schema.get("additionalProperties") is not False:
+            raise ContractError("Gemini response schema must reject additional properties")
+        inputs = body.get("input")
+        if (
+            not isinstance(inputs, list)
+            or len(inputs) != 1
+            or not isinstance(inputs[0], dict)
+            or set(inputs[0]) != {"type", "content"}
+            or inputs[0].get("type") != "user_input"
+            or not isinstance(inputs[0].get("content"), list)
+            or len(inputs[0]["content"]) != 1
+            or not isinstance(inputs[0]["content"][0], dict)
+            or set(inputs[0]["content"][0]) != {"type", "text"}
+            or inputs[0]["content"][0].get("type") != "text"
+            or not isinstance(inputs[0]["content"][0].get("text"), str)
+            or not inputs[0]["content"][0]["text"].strip()
+            or not isinstance(body.get("system_instruction"), str)
+            or not body["system_instruction"].strip()
+        ):
+            raise ContractError(
+                "every Gemini sample must be one fresh system_instruction+user_input request"
+            )
+        for forbidden in (
+            "tools",
+            "agent",
+            "agent_config",
+            "previous_interaction_id",
+            "metadata",
+        ):
+            if forbidden in body:
+                raise ContractError(f"forbidden outgoing Gemini field: {forbidden}")
+        assert_no_label_keys(body)
+        return
+
     expected_keys = (
         {
             "model",

@@ -52,7 +52,8 @@ SCORING_RECORD_KEYS = {
 COMPARISON_DISCLAIMER = (
     "Porównanie ma charakter opisowy: n=30, dane syntetyczne i "
     "challenge-enriched. Nie dowodzi przewagi modelu, frameworka ani gotowości "
-    "produkcyjnej. Różne prompty lub adaptery oznaczają porównanie całych "
+    "produkcyjnej. Cross-provider Direct obejmuje model oraz natywny protokół "
+    "providera; różne prompty lub architektury oznaczają porównanie całych "
     "system bundles, a nie izolowanego wpływu jednego komponentu."
 )
 
@@ -423,6 +424,12 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         for run in runs
     ]
     adapters = [config.get("adapter") for config in runtime_configs]
+    architectures = [
+        "crew"
+        if config.get("adapter") == "crewai_sequential_offline"
+        else "direct"
+        for config in runtime_configs
+    ]
     models = [config.get("requested_model") for config in runtime_configs]
     providers = [config.get("provider") for config in runtime_configs]
     request_profiles = [
@@ -437,11 +444,17 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
     reasoning_efforts = [config.get("reasoning_effort") for config in runtime_configs]
     prompt_same = len(set(prompts)) == 1
     adapter_same = len(set(adapters)) == 1
+    architecture_same = len(set(architectures)) == 1
     model_same = len(set(models)) == 1
     provider_same = len(set(providers)) == 1
     comparison_type = (
         "model_or_provider_delta"
-        if prompt_same and adapter_same and (not model_same or not provider_same)
+        if prompt_same
+        and architecture_same
+        and (
+            not provider_same
+            or (adapter_same and not model_same)
+        )
         else "replication"
         if prompt_same and adapter_same and model_same and provider_same
         else "system_bundle_delta"
@@ -455,6 +468,7 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         "comparison_type": comparison_type,
         "same_prompt": prompt_same,
         "same_adapter": adapter_same,
+        "same_architecture": architecture_same,
         "same_model": model_same,
         "same_provider": provider_same,
         "same_request_profile": len(set(request_profiles)) == 1,

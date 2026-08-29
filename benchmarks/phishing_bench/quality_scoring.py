@@ -158,6 +158,7 @@ def _validate_quality_run_profile(
         and required_reservation == round(float(projected_reservation) * 1.2, 10)
         and required_reservation <= float(runtime_config["budget"]["max_cost_usd"])
     )
+    is_gemini = runtime_config.get("adapter") == "gemini_interactions"
     if runtime_config.get("evaluation_profile") == CREWAI_QUALITY_PILOT_PROFILE:
         expected_security_contract = {
             "store": False,
@@ -170,6 +171,18 @@ def _validate_quality_run_profile(
             "crewai_first_run_tracing": False,
             "crewai_task_output_persistence": False,
             "model_observation": "configured_request_model_via_crewai_event",
+            "runtime_config_exposes_scoring_path": False,
+            "input_data_class": runtime_config["security"]["data_class"],
+        }
+    elif is_gemini:
+        expected_security_contract = {
+            "store": False,
+            "tools": "absent",
+            "conversation": "absent",
+            "previous_interaction_id": "absent",
+            "background": False,
+            "stream": False,
+            "provider_egress": "generativelanguage.googleapis.com_only",
             "runtime_config_exposes_scoring_path": False,
             "input_data_class": runtime_config["security"]["data_class"],
         }
@@ -489,6 +502,10 @@ def score_quality_run(
         manifest.get("runtime_config", {}).get("adapter")
         == "crewai_sequential_offline"
     )
+    is_gemini = (
+        manifest.get("runtime_config", {}).get("adapter")
+        == "gemini_interactions"
+    )
     retry_attempts = (
         0
         if is_crewai
@@ -636,7 +653,13 @@ def score_quality_run(
         "stage": "ENGINEERING_PILOT",
         "campaign_status": campaign_status,
         "comparative_conclusion": "INCONCLUSIVE",
-        "evaluation_track": "crewai_offline" if is_crewai else "openai_direct",
+        "evaluation_track": (
+            "crewai_offline"
+            if is_crewai
+            else "gemini_direct"
+            if is_gemini
+            else "openai_direct"
+        ),
         "comparison_scope": (
             manifest.get("runtime_config", {}).get("system_bundle_delta")
             if is_crewai
@@ -783,7 +806,13 @@ def score_quality_run(
     status_summary = ", ".join(
         f"{status}={count}" for status, count in sorted(status_counts.items())
     ) or "brak"
-    track_name = "CrewAI Offline" if is_crewai else "OpenAI Direct"
+    track_name = (
+        "CrewAI Offline"
+        if is_crewai
+        else "Google Gemini Direct"
+        if is_gemini
+        else "OpenAI Direct"
+    )
     attempt_summary = (
         f"LLM calls: {attempts}; workflows: {len(results)}; workflow retry: 0"
         if is_crewai

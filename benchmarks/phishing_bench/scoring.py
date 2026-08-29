@@ -582,6 +582,7 @@ def score_run(
     valid_schema_count = sum(bool(result.get("response_schema_valid")) for result in results)
     attempts = sum(int(result.get("outbound_attempts", 0)) for result in results)
     is_crewai = runtime_config.get("adapter") == "crewai_sequential_offline"
+    is_gemini = runtime_config.get("adapter") == "gemini_interactions"
     retry_attempts = (
         0
         if is_crewai
@@ -652,7 +653,13 @@ def score_run(
         "stage": "ENGINEERING_PILOT",
         "campaign_status": campaign_status,
         "comparative_conclusion": "INCONCLUSIVE",
-        "evaluation_track": "crewai_offline" if is_crewai else "openai_direct",
+        "evaluation_track": (
+            "crewai_offline"
+            if is_crewai
+            else "gemini_direct"
+            if is_gemini
+            else "openai_direct"
+        ),
         "comparison_scope": (
             runtime_config.get("system_bundle_delta") if is_crewai else None
         ),
@@ -758,7 +765,13 @@ def score_run(
         if technical_failure_count
         else ""
     )
-    report_title = "Raport CrewAI Offline smoke" if is_crewai else "Raport OpenAI Direct smoke"
+    report_title = (
+        "Raport CrewAI Offline smoke"
+        if is_crewai
+        else "Raport Google Gemini Direct smoke"
+        if is_gemini
+        else "Raport OpenAI Direct smoke"
+    )
     attempt_line = (
         f"LLM calls: {attempts}; workflow retry: {retry_attempts}"
         if is_crewai

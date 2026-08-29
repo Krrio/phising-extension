@@ -35,8 +35,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="benchmark_cli.py",
         description=(
-            "Bezpieczny harness OpenAI Direct i CrewAI Offline: smoke oraz "
-            "syntetyczny pilot jakości."
+            "Bezpieczny harness Direct (OpenAI/Google) i CrewAI Offline: "
+            "smoke oraz syntetyczny pilot jakości."
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -124,7 +124,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             api_key = api_key_from_environment(args.campaign, REPO_ROOT)
             if not api_key:
-                raise ContractError("ustaw OPENAI_API_KEY w środowisku procesu")
+                raise ContractError(
+                    f"ustaw {config['api_key_env']} w środowisku procesu"
+                )
             if config.get("evaluation_profile") in CREWAI_PROFILES:
                 # Import only after the CLI has independently confirmed an
                 # explicitly exported key. CrewAI 1.15.8 can load .env during

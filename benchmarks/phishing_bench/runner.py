@@ -13,6 +13,7 @@ from typing import Any, Callable
 from . import __version__
 from .contracts import (
     ContractError,
+    GEMINI_PROFILES,
     GPT54_PROFILES,
     QUALITY_PROFILES,
     action_for_output,
@@ -46,7 +47,9 @@ CRITICAL_SYSTEM_MARKERS = (
     "[H — HIERARCHIA ZAUFANIA]",
     "Te instrukcje systemowe mają najwyższy priorytet",
 )
-SECRET_OUTPUT_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
+SECRET_OUTPUT_RE = re.compile(
+    r"(?:\bsk-[A-Za-z0-9_-]{8,}\b|\bAIza[0-9A-Za-z_-]{20,}\b)"
+)
 CRITICAL_SECURITY_EVENT_TYPES = {
     "unauthorized_tool_execution",
     "unauthorized_network_egress",
@@ -138,6 +141,7 @@ def readiness_report(
     max_retries = int(config["max_retries_per_sample"])
     projected_ceiling = round(sum(reservations) * (1 + max_retries), 10)
     evaluation_profile = config.get("evaluation_profile", "openai_direct_smoke_v1")
+    is_gemini = evaluation_profile in GEMINI_PROFILES
     required_cost_cap = (
         round(projected_ceiling * 1.2, 10)
         if evaluation_profile in QUALITY_PROFILES
@@ -149,19 +153,17 @@ def readiness_report(
             f"required campaign reservation ${required_cost_cap:.4f}"
         )
     harness_hashes = _harness_hashes(repo_root)
-    report = {
-        "schema_version": "1.0",
-        "checked_at": utc_now(),
-        "status": "READY_FOR_MANUAL_LIVE_CONFIRMATION",
-        "campaign_id": config["campaign_id"],
-        "evaluation_profile": evaluation_profile,
-        "stage": config["stage"],
-        "record_count": len(assets["dataset"]),
-        "config_id": config["config_id"],
-        "requested_model": config["requested_model"],
-        "endpoint": config["endpoint"],
-        "adapter": config["adapter"],
-        "request_contract": {
+    request_contract = (
+        {
+            "request_profile": config["request_profile"],
+            "instruction_role": "system_instruction",
+            "token_limit_field": "generation_config.max_output_tokens",
+            "thinking_level": config["thinking_level"],
+            "seed": config["seed"],
+            "temperature": None,
+        }
+        if is_gemini
+        else {
             "request_profile": config.get(
                 "request_profile", "chat_completions_legacy_v1"
             ),
@@ -177,15 +179,44 @@ def readiness_report(
             ),
             "reasoning_effort": config.get("reasoning_effort"),
             "temperature": config["temperature"],
-        },
-        "security_contract": {
+        }
+    )
+    security_contract = (
+        {
+            "store": False,
+            "tools": "absent",
+            "conversation": "absent",
+            "previous_interaction_id": "absent",
+            "background": False,
+            "stream": False,
+            "provider_egress": "generativelanguage.googleapis.com_only",
+            "runtime_config_exposes_scoring_path": False,
+            "input_data_class": config["security"]["data_class"],
+        }
+        if is_gemini
+        else {
             "store": False,
             "tools": "absent",
             "conversation": "absent",
             "background": "absent",
             "runtime_config_exposes_scoring_path": False,
             "input_data_class": config["security"]["data_class"],
-        },
+        }
+    )
+    report = {
+        "schema_version": "1.0",
+        "checked_at": utc_now(),
+        "status": "READY_FOR_MANUAL_LIVE_CONFIRMATION",
+        "campaign_id": config["campaign_id"],
+        "evaluation_profile": evaluation_profile,
+        "stage": config["stage"],
+        "record_count": len(assets["dataset"]),
+        "config_id": config["config_id"],
+        "requested_model": config["requested_model"],
+        "endpoint": config["endpoint"],
+        "adapter": config["adapter"],
+        "request_contract": request_contract,
+        "security_contract": security_contract,
         "hashes": {
             "runtime_config_sha256": sha256_file(config_path),
             "dataset_sha256": sha256_file(paths["dataset_path"]),
@@ -227,7 +258,7 @@ def _security_events(response: ProviderResponse, api_key: str) -> list[dict[str,
                 "type": "blocked_unauthorized_request",
                 "severity": "high",
                 "blocked": True,
-                "detector": "chat_response_tool_call_guard",
+                "detector": "provider_response_tool_call_guard",
                 "evidence_ref": f"sha256:{response_hash}",
             }
         )
@@ -400,14 +431,20 @@ def run_campaign(
         check_local_tls=uses_default_transport,
     )
     if not api_key.strip():
-        raise ContractError("OPENAI_API_KEY is empty")
+        raise ContractError(f"{config['api_key_env']} is empty")
     if os.environ.get("SSLKEYLOGFILE"):
         raise ContractError("unset SSLKEYLOGFILE before live run; TLS key logging is forbidden")
     if store_reasoning and config["security"]["data_class"] != "synthetic_reserved_domains_only":
         raise ContractError("reasoning may be stored only for the explicitly synthetic smoke")
     if output_root.resolve() in {Path("/").resolve(), Path.home().resolve(), repo_root.resolve()}:
         raise ContractError("output root is too broad; use a dedicated run directory")
-    transport = transport or OpenAIChatTransport()
+    if transport is None:
+        if config.get("evaluation_profile") in GEMINI_PROFILES:
+            from .gemini_direct import GeminiInteractionsTransport
+
+            transport = GeminiInteractionsTransport()
+        else:
+            transport = OpenAIChatTransport()
     ensure_private_directory(output_root)
     run_id = f"{config['campaign_id']}__{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}__{uuid.uuid4().hex[:8]}"
     run_dir = output_root / run_id
@@ -546,7 +583,9 @@ def run_campaign(
                 result["resolved_model"] = response.resolved_model
                 result["finish_reason"] = response.finish_reason
                 result["response_id"] = response.response_id
-                result["provider_request_id"] = response.safe_headers.get("x-request-id")
+                result["provider_request_id"] = response.safe_headers.get(
+                    "x-request-id"
+                ) or response.safe_headers.get("x-goog-request-id")
                 result["security_events"].extend(security_events)
                 critical_security_event = any(
                     event["severity"] == "critical"
@@ -592,7 +631,7 @@ def run_campaign(
                 if response.finish_reason != "stop":
                     final_error = {
                         "type": "incomplete_output",
-                        "message": "OpenAI finish_reason was not stop",
+                        "message": "provider finish status was not complete",
                         "status_code": None,
                     }
                     append_jsonl(

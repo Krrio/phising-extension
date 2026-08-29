@@ -14,7 +14,7 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe, wykonane i policzone są trzy tory: bazowy OpenAI Direct, CrewAI Offline oraz OpenAI Direct z przypiętym `gpt-5.4-nano-2026-03-17`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Czwarty tor, OpenAI Direct `gpt-5.4-mini-2026-03-17`, jest zamrożony i lokalnie zweryfikowany, ale nie wykonał jeszcze żadnego płatnego requestu. Wspólny, całkowicie offline exporter `compare` sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
+Gotowe, wykonane i policzone są cztery tory: bazowy OpenAI Direct, CrewAI Offline oraz OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Piąty tor, Google Gemini 3.5 Flash-Lite, ma gotowy adapter, zamrożone kampanie smoke/pilot, komplet testów kontraktu oraz pozytywny readiness; czeka na commit/push i dokładnie jeden ręcznie potwierdzony live smoke. Wspólny, całkowicie offline exporter `compare` sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
 
 Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
 
@@ -23,15 +23,16 @@ Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
 | Direct `gpt-4o-mini-2024-07-18` | 15 / 3 / 12 / 0 | 0,909091 | 0,200000 | 0,00773385 USD | 2291,351 ms | `PILOT_HOLD` |
 | CrewAI Offline, ten sam model | 15 / 7 / 8 / 0 | 0,810811 | 0,466667 | 0,02364090 USD | 6981,653 ms | `PILOT_HOLD` |
 | Direct `gpt-5.4-nano-2026-03-17` | 15 / 11 / 4 / 0 | 0,731707 | 0,733333 | 0,00964995 USD | 1314,905 ms | `PILOT_HOLD` |
+| Direct `gpt-5.4-mini-2026-03-17` | 15 / 1 / 14 / 0 | 0,967742 | 0,066667 | 0,03107325 USD | 1290,606 ms | `PILOT_HOLD` |
 
-Wszystkie trzy warianty miały recall `1,0`, ale mały, challenge-enriched pilot nie pozwala ogłosić zwycięzcy ani gotowości produkcyjnej. Nano było najszybsze, lecz nie przeszło bramki false positives: 11/15 benign dostało `warn` lub `hide`, w tym dwa `hide`.
+Wszystkie cztery warianty miały recall `1,0`, ale mały, challenge-enriched pilot nie pozwala ogłosić zwycięzcy ani gotowości produkcyjnej. Mini miało najmniej false positives, lecz nie przeszło bramki `benign_hide_zero`: jeden przekazany do IT phishing został ukryty zamiast dopuszczony lub ostrzeżony. Nano miało 11/15 benign z akcją `warn` albo `hide`, w tym dwa `hide`.
 
 ```text
 5 syntetycznych runner inputs
         ↓
 walidacja label/PII/egress/budżetu
         ↓
-OpenAI Direct, strict JSON, R=1, concurrency=1
+Direct adapter OpenAI albo Google, strict JSON, R=1, concurrency=1
         ↓
 attempts.jsonl + results.jsonl + budget ledger + manifest
         ↓
@@ -78,10 +79,13 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001/` | ten sam zestaw 30 co baseline, limit 60 attempts / 0,25 USD / 2 h |
 | `campaigns/BUDGET_30H_OPENAI_GPT54_MINI_SMOKE_001/` | challenger GPT-5.4 Mini: smoke 5, przypięty snapshot, reasoning `none`, limit 0,10 USD |
 | `campaigns/BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001/` | ten sam zestaw 30 co pozostałe Direct, limit 60 attempts / 0,65 USD / 2 h |
+| `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_001/` | pierwszy direct challenger Google: Gemini 3.5 Flash-Lite przez Interactions API, smoke 5, limit 0,10 USD |
+| `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_001/` | ten sam zestaw 30 i frozen assets, limit 60 attempts / 0,30 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
+| `phishing_bench/gemini_direct.py` | bezpośredni transport Gemini Interactions z izolacją sieci, limitem odpowiedzi i bezpiecznym parsowaniem usage |
 | `phishing_bench/comparison.py` | offline integrity gate i eksport wielu modeli/silników do CSV/JSON/Markdown |
 | `phishing_bench/` | transport, kontrakty, ledger, runner i scorer |
 | `tests/test_benchmark.py` | deterministyczne testy bez API i bez kosztu |
@@ -89,8 +93,10 @@ Najważniejsze pliki:
 | `tests/test_comparison.py` | porównania sparowane, wykrywanie manipulacji i bezpieczny eksport CSV |
 | `tests/test_gpt54_nano_campaign.py` | drift modelu/requestu/cen oraz pełny mockowany run i scoring GPT-5.4 nano |
 | `tests/test_gpt54_mini_campaign.py` | drift, budżet, pełny mockowany pilot/scoring i porównanie Mini–Nano |
+| `tests/test_gemini_campaign.py` | kontrakt kampanii Gemini, readiness, pełny mockowany pilot/scoring i porównanie cross-provider |
+| `tests/test_gemini_transport.py` | nagłówkowe uwierzytelnienie, TLS/egress/proxy, retry, limity odpowiedzi, tool blocking i mapowanie usage Gemini |
 
-Tor Direct używa wyłącznie biblioteki standardowej Pythona i nie ma niewidocznych retry SDK. Tor CrewAI działa w przypiętym środowisku backendu (`crewai==1.15.8`), ale wymusza `max_retries=0`, trzy calls na workflow, dokładny Chat Completions endpoint i `store=false`. Oba tory blokują egress poza `api.openai.com`, ignorują proxy, nie pobierają URL-i z wiadomości i odmawiają live runu przy aktywnym `SSLKEYLOGFILE`. CrewAI ma dodatkowo wyłączone anonimowe OTLP telemetry, tracking oraz first-run tracing przed pierwszym importem frameworka.
+Adaptery Direct używają wyłącznie biblioteki standardowej Pythona i nie mają niewidocznych retry SDK. Każdy ma osobną dokładną allowlistę egressu: OpenAI tylko `api.openai.com`, a Gemini tylko `generativelanguage.googleapis.com`. Oba ignorują proxy, nie pobierają URL-i z wiadomości i odmawiają live runu przy aktywnym `SSLKEYLOGFILE`. Tor CrewAI działa w przypiętym środowisku backendu (`crewai==1.15.8`), ale wymusza `max_retries=0`, trzy calls na workflow, dokładny Chat Completions endpoint i `store=false`; dodatkowo wyłącza anonimowe OTLP telemetry, tracking oraz first-run tracing przed pierwszym importem frameworka.
 
 ## Jak wykonać test
 
@@ -102,7 +108,7 @@ Wszystkie polecenia uruchamiaj z głównego katalogu repozytorium. Runner wymaga
 python3 -m unittest discover -s benchmarks/tests -v
 
 # Pełny zestaw razem z testami runtime CrewAI:
-env -u OPENAI_API_KEY PYTHONWARNINGS=ignore \
+env -u OPENAI_API_KEY -u GEMINI_API_KEY PYTHONWARNINGS=ignore \
   backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -v
 ```
 
@@ -124,6 +130,8 @@ Testy sprawdzają między innymi:
 - pełny sekwencyjny kickoff CrewAI przy zamockowanej wyłącznie granicy providera: dokładnie trzy role i trzy calls;
 - dokładny model snapshot, `store=false`, strict JSON na orkiestratorze, brak tools w agentach i brak retry;
 - wyłączenie anonimowej telemetrii/tracingu CrewAI oraz blokadę każdego hosta poza OpenAI.
+- dokładny payload Gemini Interactions, brak `temperature`, tools i stanu, `store=false`, minimal thinking oraz przekazywanie klucza wyłącznie w nagłówku;
+- parser statusu, structured output i usage Gemini, w tym cached oraz thought tokens, bez zapisywania sekretów i surowych błędów providera.
 
 Sprawdzenie, czy wygenerowane dane nadal są dokładnie zgodne ze źródłem i kodem produktu:
 
@@ -333,7 +341,7 @@ Ten tor zachował te same runner inputs, prompt, strict JSON Schema i decision p
 
 Smoke zakończył się `READINESS_PASS`: 5/5 `success`, 5/5 strict schema, 5/5 golden actions, zero błędów, retry i security events, koszt 0,00192406 USD, mediana 1825,607 ms. Pilot miał 30/30 `success`, ale zakończył się `PILOT_HOLD`: `TP=15, FP=11, TN=4, FN=0`, F1 `0,731707`, FPR `0,733333`, koszt 0,00964995 USD i mediana 1314,905 ms. Nie uruchamiaj tych campaign IDs ponownie; słaby wynik jakości jest wynikiem eksperymentu, nie powodem do rerunu.
 
-## Następny challenger: GPT-5.4 Mini
+## Challenger OpenAI Direct: GPT-5.4 Mini
 
 Kampania przypina `gpt-5.4-mini-2026-03-17`. Jest to mocniejszy tier tej samej rodziny i ma dokładnie ten sam request profile co Nano, więc porównanie Mini–Nano izoluje zmianę modelu lepiej niż przejście na alias bez datowanego snapshotu. Zamrożona cena z 28 sierpnia 2026 to 0,75 USD/M input, 0,075 USD/M cached input i 4,50 USD/M output.
 
@@ -416,6 +424,88 @@ cat "$MINI_PILOT_RUN/scoring/report.md"
 
 Pilot jest screeningiem opisowym. Nie tunuj promptu ani polityki na tych samych 30 rekordach i nie powtarzaj runu po słabym wyniku; każda świadoma zmiana wymaga nowego campaign ID oraz nowego zestawu do potwierdzenia.
 
+## Następny challenger: Google Gemini 3.5 Flash-Lite
+
+Gemini `gemini-3.5-flash-lite` jest pierwszym direct challengerem spoza OpenAI. Google opisuje go jako stabilny, niskokosztowy model do zadań o dużym wolumenie; wspiera Structured Outputs i parametr `thinking_level`. Kampania używa zalecanego dla nowych integracji Interactions API, przypina `thinking_level="minimal"`, nie wysyła `temperature`, nie udostępnia tools i ustawia `store=false`. Ten sam prompt, schema, decision policy oraz próbki pozwalają mierzyć zmianę providera/modelu zamiast zmianę logiki produktu.
+
+Zamrożona standardowa cena Paid Tier sprawdzona 29 sierpnia 2026 wynosi `0,30 USD/M` input, `0,03 USD/M` cached input oraz `2,50 USD/M` output, wliczając thinking tokens. Oficjalne źródła: [model Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), [REST API v1](https://ai.google.dev/api/interactions-api-v1), [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output), [thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking) i [cennik](https://ai.google.dev/gemini-api/docs/pricing).
+
+Google wskazuje, że w Free Tier przesłane treści mogą być używane do ulepszania produktów, a w Paid Tier — nie. Dlatego live benchmark wykonuj wyłącznie w osobnym płatnym projekcie z project-scoped kluczem i nadal wysyłaj tylko syntetyczne dane z domenami zarezerwowanymi. `store=false` wyłącza stan interakcji po stronie API, ale nie zastępuje warunków przetwarzania danych ani umowy z providerem.
+
+### 1. Testy, validate i dry-run Gemini — 0 USD
+
+Nie wykonuj live runu, dopóki pełny zestaw testów, oba `validate` i smoke dry-run nie przejdą lokalnie. Klucz nie jest do nich potrzebny:
+
+```bash
+GEMINI_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_001/runtime_config.json"
+GEMINI_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_001/runtime_config.json"
+
+env -u GEMINI_API_KEY PYTHONWARNINGS=ignore \
+  backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -v
+
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
+  --campaign "$GEMINI_SMOKE_CONFIG"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$GEMINI_SMOKE_CONFIG"
+
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
+  --campaign "$GEMINI_PILOT_CONFIG"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$GEMINI_PILOT_CONFIG"
+```
+
+Oczekiwany kontrakt smoke to 5 rekordów, model `gemini-3.5-flash-lite`, endpoint `/v1/interactions`, strict `response_format`, `thinking_level="minimal"`, `seed=0`, brak `temperature`, tools i zapisu stanu oraz maksymalnie 10 attempts. Twardy cap smoke wynosi `0,10 USD`; pilot ma 30 rekordów, maksymalnie 60 attempts i cap `0,30 USD`.
+
+### 2. Dokładnie jeden live smoke Gemini i scoring
+
+Najpierw commituj zamrożony harness i upewnij się, że worktree jest czysty. Użyj klucza z płatnego projektu; nie zapisuj go w repo, pliku `.env` ani historii polecenia:
+
+```bash
+read -s GEMINI_API_KEY
+export GEMINI_API_KEY
+
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$GEMINI_SMOKE_CONFIG" \
+  --live \
+  --confirm-campaign BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_001
+
+unset GEMINI_API_KEY
+
+GEMINI_SMOKE_RUN="/absolutna/sciezka/wypisana/przez/live-run"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
+  --run-dir "$GEMINI_SMOKE_RUN" \
+  --labels benchmarks/secure_scoring/openai_smoke_v1/labels.jsonl
+
+cat "$GEMINI_SMOKE_RUN/scoring/report.md"
+```
+
+Nie powtarzaj smoke automatycznie. Pilot jest dozwolony dopiero po ręcznym sprawdzeniu 5 terminalnych sukcesów, strict schema, dokładnego modelu, kompletnego usage oraz zera błędów, retry i security events.
+
+### 3. Jeden pilot Gemini `n=30` — wyłącznie po przejściu smoke
+
+Po pozytywnym smoke ponownie ustaw klucz i wykonaj dokładnie jeden płatny pilot:
+
+```bash
+read -s GEMINI_API_KEY
+export GEMINI_API_KEY
+
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
+  --campaign "$GEMINI_PILOT_CONFIG" \
+  --live \
+  --confirm-campaign BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_001
+
+unset GEMINI_API_KEY
+
+GEMINI_PILOT_RUN="/absolutna/sciezka/wypisana/przez/live-run"
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
+  --run-dir "$GEMINI_PILOT_RUN" \
+  --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl
+
+cat "$GEMINI_PILOT_RUN/scoring/report.md"
+```
+
+Scoring jest offline i nie wykonuje dodatkowych requestów. Zachowaj wynik także wtedy, gdy dostanie `PILOT_HOLD`; nie stroimy promptu ani nie uruchamiamy ponownie tych samych 30 przypadków.
+
 ## Porównanie wielu modeli i silników — 0 USD
 
 `compare` nie wykonuje requestów i nie potrzebuje klucza API. Pierwszy `--run` jest baseline. Każdy wariant musi być wcześniej policzony przez `score` na dokładnie tym samym zaufanym bundle labeli. Komenda ponownie sprawdza zamknięte artefakty runu, zgodność datasetu, labeli, decision policy, response schema, per-sample input hash oraz matematykę scoringu.
@@ -451,7 +541,7 @@ Nie mieszaj dwóch osi eksperymentu. OpenAI, Google, Cohere, Mistral i Anthropic
 | Decyzja produktu | verdict, trust score, confidence, categories i action | czy wynik modelu mapuje się na allow/warn/hide zgodnie z bieżącą polityką |
 | Golden smoke | oczekiwana akcja na pięciu fixture'ach | tylko ręczna kontrola przewodu, nie estymata jakości |
 | Niezawodność | status, attempts, retry, timeout/429/5xx/refusal/invalid output | wszystkie niepowodzenia zostają w mianowniku; status pozostaje błędem, a action=`allow` odzwierciedla obecny fail-open produktu |
-| Zużycie | input/cached/output/reasoning/total tokens | faktyczne usage zwrócone przez OpenAI |
+| Zużycie | input/cached/output/reasoning/total tokens | faktyczne usage zwrócone przez danego providera |
 | Koszt | observed USD i lokalna konserwatywna rezerwacja | observed to koszt wyliczony z usage; invoice providera pozostaje rozstrzygający |
 | Czas | min/median/max end-to-end latency rekordów ze statusem `success` | opis przewodu; przy n=5 bez p95/p99 |
 | Bezpieczeństwo | blocked tool proposal, exact system/secret disclosure i model drift | disclosure daje `SECURITY_FAIL`; zablokowana propozycja jest high diagnostic, a drift daje `INVALID` |
@@ -511,16 +601,16 @@ Statusy końcowe:
 
 ## Zaktualizowana kolejność dalszych prac
 
-1. Direct, CrewAI Offline i GPT-5.4 Nano mają ukończone smoke oraz pilot `n=30`. Zachować runy i eksport trzywariantowy bez rerunów; wszystkie wyniki pozostają `INCONCLUSIVE`.
-2. Commitnąć i pushnąć zamrożoną kampanię GPT-5.4 Mini, wykonać dokładnie jeden smoke `n=5` i policzyć go offline.
-3. Tylko po technicznym przejściu smoke wykonać jeden pilot Mini `n=30`, bez strojenia na widzianym zestawie i bez automatycznego rerunu.
-4. Po scoringu Mini utworzyć nowy eksport czterowariantowy. Porównanie Nano–Mini ma ten sam request profile i najlepiej izoluje zmianę tieru modelu; porównanie zawierające CrewAI pozostaje `system_bundle_delta`.
-5. Następnie dodać maksymalnie 2–3 tanie direct adapters innych providerów. Dokładne modele, snapshoty i ceny ponownie zweryfikować tuż przed zamrożeniem każdego campaign ID.
-6. Screening: jeden smoke `n=5`, a po przejściu bramki jeden pilot `n=30` na provider. Nie uruchamiać CrewAI dla każdego modelu — zaciera to koszt i wpływ samego silnika.
+1. Zachować bez rerunów ukończone runy Direct, CrewAI Offline, GPT-5.4 Nano i GPT-5.4 Mini oraz ich eksport czterowariantowy; wyniki nadal są opisowe i `INCONCLUSIVE`.
+2. Adapter Gemini, testy kontraktu, pełny lokalny zestaw testów, oba `validate` i dry-runy są ukończone bez live calla.
+3. Commitnąć i pushnąć zamrożone kampanie Gemini, a następnie wykonać dokładnie jeden smoke `n=5` i policzyć go offline.
+4. Tylko po technicznym przejściu smoke wykonać jeden pilot Gemini `n=30`, bez strojenia na widzianym zestawie i bez automatycznego rerunu.
+5. Po scoringu Gemini utworzyć nowy eksport pięciowariantowy. Para Direct OpenAI–Direct Gemini ma typ `model_or_provider_delta`: architektura, dane, prompt, schema i polityka są wspólne, ale zmieniają się model, provider i natywny protokół API, więc nie jest to czysta delta modelu. Każde porównanie obejmujące CrewAI pozostaje `system_bundle_delta`.
+6. Następnie dodać najwyżej 1–2 kolejne tanie direct adapters innych providerów. Dokładne modele, snapshoty i ceny ponownie zweryfikować tuż przed zamrożeniem każdego campaign ID.
 7. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
 8. `n=30` służy do screeningu i debugowania, `n=100` do ostrożnego confirmation. Żaden wynik syntetyczny sam w sobie nie dowodzi gotowości produkcyjnej; później potrzebny jest osobny, zanonimizowany i zgodnie dopuszczony zestaw z rzeczywistego rozkładu ruchu.
 
-Przy limicie 30 godzin rozsądny zakres to: istniejące 2 piloty zachować, dodać 2–3 challengery po `5+30` próbek, a następnie wykonać `2 × 100` blind confirmation tylko dla finalistów. To daje informację o wielu silnikach bez marnowania budżetu na 100–200 maili dla każdego słabego wariantu.
+Przy limicie 30 godzin rozsądny zakres to: zachować istniejące cztery piloty, dodać Gemini jako kolejny challenger `5+30`, ewentualnie dołożyć jeszcze najwyżej 1–2 tanie adaptery Direct, a następnie wykonać `2 × 100` blind confirmation tylko dla finalistów. To daje informację o wielu silnikach bez marnowania budżetu na 100–200 maili dla każdego słabego wariantu.
 
 W blind confirmation hash scoring bundle musi zostać prerejestrowany w zaufanym miejscu przed pierwszym call, niezależnie od repo i operatora runnera. Sąsiedni `scoring_manifest.json` wystarcza do jawnych syntetycznych pilotów, ale nie jest granicą bezpieczeństwa dla ukrytych labeli.
 
@@ -536,7 +626,7 @@ Budowa harnessu, danych i anotacji jest przygotowaniem przed startem 30-godzinne
 - OpenAI, [Chat Completions API](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions)
 - OpenAI, [kontrola danych API](https://developers.openai.com/api/docs/guides/your-data)
 - Cohere, [Command R7B](https://docs.cohere.com/docs/command-r7b) i [Structured Outputs](https://docs.cohere.com/v2/docs/structured-outputs)
-- Google, [Gemini 2.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite), [ceny](https://ai.google.dev/gemini-api/docs/pricing) i [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output)
+- Google, [Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), [REST API v1](https://ai.google.dev/api/interactions-api-v1), [thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking), [ceny](https://ai.google.dev/gemini-api/docs/pricing) i [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 - Mistral, [Mistral Small 4](https://docs.mistral.ai/models/mistral-small-4-0-26-03) i [Structured Outputs](https://docs.mistral.ai/studio/conversations/structured-output/custom)
 - CrewAI, [Agents 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/agents), [Tasks 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/tasks), [Crews 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/crews) i [LLMs 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/llms)
 - CrewAI, [changelog](https://docs.crewai.com/en/changelog)
