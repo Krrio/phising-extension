@@ -14,7 +14,7 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe, wykonane i policzone są cztery tory: bazowy OpenAI Direct, CrewAI Offline oraz OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Dwa live smoke Google Gemini 3.5 Flash-Lite są zachowanymi wynikami negatywnymi: `SMOKE_001` wykonał 10 niezgodnych prób, a diagnostyczny `SMOKE_002` po jednym HTTP `200` potwierdził kompletny keyset odpowiedzi stateless bez oczekiwanego `id` i bezpiecznie zatrzymał pozostałe rekordy. Nowy `SMOKE_003` wąsko dopuszcza wyłącznie to zaobserwowane odstępstwo i jawnie zapisuje je jako diagnostykę; nie był jeszcze wykonany live. Wspólny, całkowicie offline exporter `compare` sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
+Gotowe, wykonane i policzone są cztery tory: bazowy OpenAI Direct, CrewAI Offline oraz OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Dwa pierwsze live smoke Google Gemini 3.5 Flash-Lite są zachowanymi wynikami negatywnymi: `SMOKE_001` wykonał 10 niezgodnych prób, a diagnostyczny `SMOKE_002` po jednym HTTP `200` potwierdził kompletny keyset odpowiedzi stateless bez oczekiwanego `id` i bezpiecznie zatrzymał pozostałe rekordy. `SMOKE_003` przeszedł `READINESS_PASS`: 5/5 sukcesów, strict schema i golden actions, zero retry, błędów oraz krytycznych zdarzeń; pięć braków `id` zostało jawnie zapisanych jako diagnostyka. Następny do wykonania jest jeden pilot Gemini `PILOT_030_002`. Wspólny, całkowicie offline exporter `compare` sprawdza integralność źródeł i tworzy dane gotowe do wykresów.
 
 Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
 
@@ -81,7 +81,7 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001/` | ten sam zestaw 30 co pozostałe Direct, limit 60 attempts / 0,65 USD / 2 h |
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_001/` | historyczny pierwszy smoke Gemini; zachowany `READINESS_FAIL`, nie uruchamiać ponownie |
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_002/` | zakończony negatywny smoke diagnostyczny: 1 attempt, bezpieczny keyset bez `id`, protocol fail-fast |
-| `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_003/` | kolejny smoke: wąska, audytowalna obsługa braku `id` tylko dla kompletnego stateless response |
+| `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_003/` | zakończony `READINESS_PASS`: wąska, audytowalna obsługa braku `id` tylko dla kompletnego stateless response |
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_002/` | następny pilot po pozytywnym `_003`: ten sam zestaw 30 i frozen assets, limit 60 attempts / 0,30 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
@@ -432,7 +432,7 @@ Gemini `gemini-3.5-flash-lite` jest pierwszym direct challengerem spoza OpenAI. 
 
 Historyczny `SMOKE_001` wykonał 10 prób i każdą zakończył `invalid_provider_response`, ponieważ w odpowiedzi nie było oczekiwanego top-level `id`. `SMOKE_002` dodał bezpieczny fingerprint oraz fail-fast i zakończył się `READINESS_FAIL` po dokładnie jednym outbound attempt; pozostałe cztery rekordy dostały `campaign_stopped`. Provider zwrócił HTTP `200` oraz dokładnie siedem nazw pól: `created,model,object,status,steps,updated,usage`, ale nadal bez `id`. To wyklucza brak środków jako przyczynę tego runu: billing/auth powinien dać błąd HTTP, a nie sukces `200`. Koszt `_002` pozostaje nieznany, ponieważ parser świadomie nie odczytywał `usage` po odrzuceniu metadanych. Surowe odpowiedzi celowo nie są zapisywane.
 
-Oficjalny kontrakt nadal opisuje `id`, więc nie traktujemy jego braku jako ogólnej nowej reguły Gemini. `SMOKE_003` dopuszcza brak `id` wyłącznie dla żądania `store=false` i dokładnie zaobserwowanego kompletnego kształtu stateless; `id=null`, brak któregokolwiek z siedmiu pól, dodatkowe pole, niewłaściwe `object`, model, status, timestampy, steps lub usage nadal kończą kampanię. Każdy zaakceptowany brak `id` jest zapisany per rekord jako `provider_metadata_omission` z severity `info` i hashem odpowiedzi, bez jej treści. Nagłówek `Api-Revision: 2026-05-20` pozostaje jawnym znacznikiem oczekiwanego kontraktu. Błędy protokołu i usage nie są retryowane; pierwszy taki błąd zatrzymuje pozostałe rekordy. Nieretryowalny błąd billing/auth/config także kończy kampanię po jednym requestcie, a `429` lub `5xx` dostaje tylko jeden retry przed zatrzymaniem. Pilot pozostaje zablokowany do `READINESS_PASS` kampanii `_003`.
+Oficjalny kontrakt nadal opisuje `id`, więc nie traktujemy jego braku jako ogólnej nowej reguły Gemini. `SMOKE_003` dopuszcza brak `id` wyłącznie dla żądania `store=false` i dokładnie zaobserwowanego kompletnego kształtu stateless; `id=null`, brak któregokolwiek z siedmiu pól, dodatkowe pole, niewłaściwe `object`, model, status, timestampy, steps lub usage nadal kończą kampanię. Każdy zaakceptowany brak `id` jest zapisany per rekord jako `provider_metadata_omission` z severity `info` i hashem odpowiedzi, bez jej treści. Nagłówek `Api-Revision: 2026-05-20` pozostaje jawnym znacznikiem oczekiwanego kontraktu. Błędy protokołu i usage nie są retryowane; pierwszy taki błąd zatrzymuje pozostałe rekordy. Nieretryowalny błąd billing/auth/config także kończy kampanię po jednym requestcie, a `429` lub `5xx` dostaje tylko jeden retry przed zatrzymaniem.
 
 Zamrożona standardowa cena Paid Tier sprawdzona 29 sierpnia 2026 wynosi `0,30 USD/M` input, `0,03 USD/M` cached input oraz `2,50 USD/M` output, wliczając thinking tokens. Oficjalne źródła: [model Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), [REST API v1](https://ai.google.dev/api/interactions-api-v1), [zmiany protokołu z maja 2026](https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026), [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output), [thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking) i [cennik](https://ai.google.dev/gemini-api/docs/pricing).
 
@@ -462,30 +462,9 @@ backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
 
 Oczekiwany kontrakt smoke to 5 rekordów, model `gemini-3.5-flash-lite`, endpoint `/v1/interactions`, nagłówek `Api-Revision: 2026-05-20`, strict `response_format`, `thinking_level="minimal"`, `seed=0`, brak `temperature`, tools i zapisu stanu oraz maksymalnie 10 attempts. Twardy cap smoke wynosi `0,10 USD`; przy fatalnym błędzie protokołu `_003` kończy się jednak po pierwszym outbound attempt. Pilot ma 30 rekordów, maksymalnie 60 attempts i cap `0,30 USD`.
 
-### 2. Dokładnie jeden naprawczy live smoke Gemini `_003` i scoring
+### 2. Zakończony live smoke Gemini `_003` — nie powtarzać
 
-Nie uruchamiaj ponownie `SMOKE_001` ani `SMOKE_002`. Najpierw commituj zamrożoną poprawkę i upewnij się, że worktree jest czysty. Użyj klucza z płatnego projektu; nie zapisuj go w repo, pliku `.env` ani historii polecenia:
-
-```bash
-read -s GEMINI_API_KEY
-export GEMINI_API_KEY
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign "$GEMINI_SMOKE_CONFIG" \
-  --live \
-  --confirm-campaign BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_003
-
-unset GEMINI_API_KEY
-
-GEMINI_SMOKE_RUN="/absolutna/sciezka/wypisana/przez/live-run"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
-  --run-dir "$GEMINI_SMOKE_RUN" \
-  --labels benchmarks/secure_scoring/openai_smoke_v1/labels.jsonl
-
-cat "$GEMINI_SMOKE_RUN/scoring/report.md"
-```
-
-Nie powtarzaj smoke automatycznie. Jeśli `_003` zatrzyma się po jednym błędzie, zachowaj jego bezpieczny komunikat diagnostyczny i najpierw przeanalizuj nową niezgodność. Pilot jest dozwolony dopiero po ręcznym sprawdzeniu 5 terminalnych sukcesów, strict schema, dokładnego modelu, kompletnego usage, zera błędów i retry oraz zera krytycznych security events. `provider_metadata_omission=5` jest oczekiwanym zapisem, jeśli zaobserwowane odstępstwo się utrzyma, a `0` jest poprawne, jeżeli wszystkie odpowiedzi znów mają niepuste `id`; wynik mieszany `1–4` wymaga ręcznego sprawdzenia.
+Run `BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_003__20260829T135622Z__f7ccca3b` zakończył się `READINESS_PASS`: 5/5 `success`, 5/5 strict schema, 5/5 golden actions, dokładny model, kompletne usage, zero błędów, retry i krytycznych security events. Każda odpowiedź nie miała `id`, dlatego raport zawiera pięć jawnych `provider_metadata_omission`; wszystkie pozostałe elementy zamrożonego kontraktu przeszły. Zaobserwowany koszt wyniósł `0,0046141 USD`, mediana latency `1259,930 ms`, a commit runu `7880f1f7e5f90cb3c4f2892f972e7e27f1f12180` miał `dirty=false`. Ten smoke jest zamknięty i nie wolno go uruchamiać ponownie.
 
 ### 3. Jeden pilot Gemini `n=30` — wyłącznie po przejściu smoke
 
@@ -611,7 +590,7 @@ Statusy końcowe:
 1. Zachować bez rerunów ukończone runy Direct, CrewAI Offline, GPT-5.4 Nano i GPT-5.4 Mini oraz ich eksport czterowariantowy; wyniki nadal są opisowe i `INCONCLUSIVE`.
 2. Zachować negatywny Gemini `SMOKE_001`: 10/10 prób bez zgodnego protokołu i bez potwierdzonego usage/kosztu; nie używać go do oceny jakości ani nie uruchamiać ponownie.
 3. Zachować negatywny Gemini `SMOKE_002`: HTTP `200`, jedna próba, dokładny bezpieczny keyset bez `id`, cztery rekordy `campaign_stopped`, nieznany koszt i `READINESS_FAIL`; nie uruchamiać ponownie.
-4. Commitnąć i pushnąć wąską, audytowalną obsługę stateless metadata omission, wykonać dokładnie jeden `SMOKE_003` i policzyć go offline. Tylko po jego `READINESS_PASS` wykonać jeden `PILOT_030_002`, bez strojenia na widzianym zestawie i bez automatycznego rerunu.
+4. Zachować pozytywny Gemini `SMOKE_003` bez rerunu: 5/5 sukcesów, koszt `0,0046141 USD`, mediana `1259,930 ms`, pięć jawnych stateless metadata omissions i `READINESS_PASS`. Wykonać dokładnie jeden `PILOT_030_002`, bez strojenia na widzianym zestawie i bez automatycznego rerunu.
 5. Po scoringu Gemini utworzyć nowy eksport pięciowariantowy. Para Direct OpenAI–Direct Gemini ma typ `model_or_provider_delta`: architektura, dane, prompt, schema i polityka są wspólne, ale zmieniają się model, provider i natywny protokół API, więc nie jest to czysta delta modelu. Każde porównanie obejmujące CrewAI pozostaje `system_bundle_delta`.
 6. Następnie dodać najwyżej 1–2 kolejne tanie direct adapters innych providerów. Dokładne modele, snapshoty i ceny ponownie zweryfikować tuż przed zamrożeniem każdego campaign ID.
 7. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
