@@ -16,7 +16,11 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "benchmarks"))
 
-from phishing_bench.contracts import GEMINI_INTERACTIONS_ENDPOINT, ContractError
+from phishing_bench.contracts import (
+    GEMINI_INTERACTIONS_API_REVISION,
+    GEMINI_INTERACTIONS_ENDPOINT,
+    ContractError,
+)
 from phishing_bench.gemini_direct import GeminiInteractionsTransport
 from phishing_bench.openai_direct import ProviderError
 
@@ -26,9 +30,15 @@ MODEL = "gemini-3.5-flash-lite"
 
 
 class _Response(io.BytesIO):
-    def __init__(self, value: dict[str, Any], headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        value: dict[str, Any],
+        headers: dict[str, str] | None = None,
+        status: int = 200,
+    ) -> None:
         super().__init__(json.dumps(value).encode("utf-8"))
         self.headers = headers or {}
+        self.status = status
 
     def __enter__(self) -> _Response:
         return self
@@ -131,6 +141,7 @@ class GeminiTransportTests(unittest.TestCase):
         request = captured["request"]
         headers = {key.lower(): value for key, value in request.header_items()}
         self.assertEqual(headers["x-goog-api-key"], FAKE_KEY)
+        self.assertEqual(headers["api-revision"], GEMINI_INTERACTIONS_API_REVISION)
         self.assertNotIn("authorization", headers)
         self.assertNotIn(FAKE_KEY, request.full_url)
         self.assertNotIn(FAKE_KEY.encode("utf-8"), request.data)
@@ -218,6 +229,47 @@ class GeminiTransportTests(unittest.TestCase):
                         timeout_seconds=1,
                     )
                 self.assertEqual(captured.exception.kind, "missing_usage")
+                self.assertFalse(captured.exception.retryable)
+                self.assertEqual(captured.exception.status_code, 200)
+                self.assertIn(
+                    "known_keys=id,model,status,steps,usage",
+                    str(captured.exception),
+                )
+
+    def test_missing_id_reports_only_a_safe_structural_fingerprint(self) -> None:
+        secret_value = "provider-value-that-must-never-be-logged"
+        transport = _transport()
+        transport._opener.open = lambda *args, **kwargs: _Response(  # type: ignore[method-assign]
+            {
+                "response": {"private": secret_value},
+                "verdict": secret_value,
+                "opaque_provider_key": secret_value,
+            },
+            {"X-Goog-Request-Id": "safe-diagnostic-request-id"},
+        )
+
+        with self.assertRaises(ProviderError) as captured:
+            transport.call(
+                api_key=FAKE_KEY,
+                endpoint=GEMINI_INTERACTIONS_ENDPOINT,
+                body={"model": MODEL},
+                timeout_seconds=1,
+            )
+
+        provider_error = captured.exception
+        message = str(provider_error)
+        self.assertEqual(provider_error.kind, "invalid_provider_response")
+        self.assertEqual(provider_error.status_code, 200)
+        self.assertEqual(
+            provider_error.response_headers,
+            {"x-goog-request-id": "safe-diagnostic-request-id"},
+        )
+        self.assertFalse(provider_error.retryable)
+        self.assertIn("top_level_key_count=3", message)
+        self.assertIn("known_keys=response,verdict", message)
+        self.assertRegex(message, r"keyset_sha256_prefix=[0-9a-f]{16}")
+        self.assertNotIn("opaque_provider_key", message)
+        self.assertNotIn(secret_value, message)
 
     def test_omitted_zero_cache_and_thought_counts_are_normalized(self) -> None:
         transport = _transport()

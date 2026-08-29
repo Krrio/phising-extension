@@ -18,6 +18,7 @@ from phishing_bench.contracts import (  # noqa: E402
     ContractError,
     GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
     GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+    GEMINI_INTERACTIONS_API_REVISION,
     GEMINI_INTERACTIONS_REQUEST_PROFILE,
     build_chat_request,
     load_and_validate_campaign,
@@ -25,7 +26,7 @@ from phishing_bench.contracts import (  # noqa: E402
     validate_runtime_config,
 )
 from phishing_bench.io_utils import read_json, read_jsonl  # noqa: E402
-from phishing_bench.openai_direct import ProviderResponse  # noqa: E402
+from phishing_bench.openai_direct import ProviderError, ProviderResponse  # noqa: E402
 from phishing_bench.runner import readiness_report, run_campaign  # noqa: E402
 from phishing_bench.scoring import score_run  # noqa: E402
 
@@ -34,6 +35,12 @@ SMOKE_CONFIG_PATH = (
     BENCHMARKS_DIR
     / "campaigns"
     / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_001"
+    / "runtime_config.json"
+)
+SMOKE_V2_CONFIG_PATH = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_002"
     / "runtime_config.json"
 )
 PILOT_CONFIG_PATH = (
@@ -56,6 +63,9 @@ MINI_PILOT_CONFIG_PATH = (
 )
 SMOKE_SCORING_MANIFEST_PATH = (
     BENCHMARKS_DIR / "secure_scoring" / "openai_smoke_v1" / "scoring_manifest.json"
+)
+SMOKE_LABELS_PATH = (
+    BENCHMARKS_DIR / "secure_scoring" / "openai_smoke_v1" / "labels.jsonl"
 )
 PILOT_LABELS_PATH = (
     BENCHMARKS_DIR / "secure_scoring" / "openai_pilot_030_v1" / "labels.jsonl"
@@ -121,9 +131,37 @@ class FakeGeminiCompatibleTransport:
         )
 
 
+class FailingGeminiTransport:
+    def __init__(self, error: ProviderError | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.error = error or ProviderError(
+            "invalid_provider_response",
+            "synthetic fatal Gemini protocol mismatch; top_level_key_count=1; "
+            "known_keys=response; keyset_sha256_prefix=0000000000000000",
+            retryable=False,
+        )
+
+    def call(
+        self,
+        *,
+        api_key: str,
+        endpoint: str,
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> ProviderResponse:
+        del api_key
+        self.calls.append(
+            {"endpoint": endpoint, "body": body, "timeout": timeout_seconds}
+        )
+        raise self.error
+
+
 class GeminiCampaignTests(unittest.TestCase):
     def test_campaigns_freeze_shared_assets_and_exact_interactions_payload(self) -> None:
         smoke, smoke_assets = load_and_validate_campaign(SMOKE_CONFIG_PATH, REPO_ROOT)
+        smoke_v2, smoke_v2_assets = load_and_validate_campaign(
+            SMOKE_V2_CONFIG_PATH, REPO_ROOT
+        )
         pilot, pilot_assets = load_and_validate_campaign(PILOT_CONFIG_PATH, REPO_ROOT)
         mini_smoke = read_json(MINI_SMOKE_CONFIG_PATH)
         mini_pilot = read_json(MINI_PILOT_CONFIG_PATH)
@@ -138,6 +176,10 @@ class GeminiCampaignTests(unittest.TestCase):
         self.assertEqual(smoke["requested_model"], "gemini-3.5-flash-lite")
         self.assertEqual(smoke["request_profile"], GEMINI_INTERACTIONS_REQUEST_PROFILE)
         self.assertEqual(smoke["api_key_env"], "GEMINI_API_KEY")
+        self.assertEqual(
+            smoke_v2["campaign_id"],
+            "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_SMOKE_002",
+        )
         self.assertIsNone(smoke["temperature"])
         self.assertEqual(smoke["thinking_level"], "minimal")
         self.assertEqual(smoke["seed"], 0)
@@ -160,9 +202,14 @@ class GeminiCampaignTests(unittest.TestCase):
             },
         )
         self.assertEqual(len(smoke_assets["dataset"]), 5)
+        self.assertEqual(len(smoke_v2_assets["dataset"]), 5)
         self.assertEqual(len(pilot_assets["dataset"]), 30)
 
-        for candidate, baseline in ((smoke, mini_smoke), (pilot, mini_pilot)):
+        for candidate, baseline in (
+            (smoke, mini_smoke),
+            (smoke_v2, mini_smoke),
+            (pilot, mini_pilot),
+        ):
             for key in (
                 "dataset_path",
                 "prompt_path",
@@ -235,6 +282,7 @@ class GeminiCampaignTests(unittest.TestCase):
             smoke_report["request_contract"],
             {
                 "request_profile": GEMINI_INTERACTIONS_REQUEST_PROFILE,
+                "api_revision": GEMINI_INTERACTIONS_API_REVISION,
                 "instruction_role": "system_instruction",
                 "token_limit_field": "generation_config.max_output_tokens",
                 "thinking_level": "minimal",
@@ -269,8 +317,103 @@ class GeminiCampaignTests(unittest.TestCase):
             read_json(SMOKE_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
         )
         self.assertIn(
+            smoke_v2["campaign_id"],
+            read_json(SMOKE_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
+        )
+        self.assertIn(
             pilot["campaign_id"],
             read_json(PILOT_SCORING_MANIFEST_PATH)["compatible_campaign_ids"],
+        )
+
+    def test_fatal_gemini_protocol_error_stops_v2_after_one_attempt(self) -> None:
+        transport = FailingGeminiTransport()
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_campaign(
+                config_path=SMOKE_V2_CONFIG_PATH,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            results = read_jsonl(run_dir / "results.jsonl")
+            attempts = read_jsonl(run_dir / "attempts.jsonl")
+            ledger = read_json(run_dir / "budget_ledger.json")
+            score_dir = score_run(
+                run_dir=run_dir,
+                labels_path=SMOKE_LABELS_PATH,
+                output_dir=None,
+                repo_root=REPO_ROOT,
+            )
+            metrics = read_json(score_dir / "metrics.json")
+
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(len(results), 5)
+        self.assertEqual(results[0]["status"], "invalid_provider_response")
+        self.assertEqual(results[0]["outbound_attempts"], 1)
+        self.assertTrue(
+            all(result["status"] == "campaign_stopped" for result in results[1:])
+        )
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(ledger["attempts_started"], 1)
+        self.assertEqual(ledger["attempts_finished"], 1)
+        self.assertEqual(ledger["cost_unknown_attempts"], 1)
+        self.assertIn("fatal Gemini response protocol error", ledger["stop_reason"])
+        self.assertEqual(metrics["campaign_status"], "READINESS_FAIL")
+
+    def test_nonretryable_gemini_http_error_stops_v2_after_one_attempt(self) -> None:
+        transport = FailingGeminiTransport(
+            ProviderError(
+                "provider_http_error",
+                "Gemini returned HTTP 403",
+                status_code=403,
+                retryable=False,
+            )
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_campaign(
+                config_path=SMOKE_V2_CONFIG_PATH,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            results = read_jsonl(run_dir / "results.jsonl")
+            ledger = read_json(run_dir / "budget_ledger.json")
+
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(results[0]["status"], "provider_http_error")
+        self.assertTrue(
+            all(result["status"] == "campaign_stopped" for result in results[1:])
+        )
+        self.assertIn("verify billing", ledger["stop_reason"])
+
+    def test_retryable_gemini_rate_limit_stops_after_one_retry(self) -> None:
+        transport = FailingGeminiTransport(
+            ProviderError(
+                "rate_limit",
+                "Gemini returned HTTP 429",
+                status_code=429,
+                retryable=True,
+            )
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_campaign(
+                config_path=SMOKE_V2_CONFIG_PATH,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            results = read_jsonl(run_dir / "results.jsonl")
+
+        self.assertEqual(len(transport.calls), 2)
+        self.assertEqual(results[0]["status"], "rate_limit")
+        self.assertEqual(results[0]["outbound_attempts"], 2)
+        self.assertTrue(
+            all(result["status"] == "campaign_stopped" for result in results[1:])
         )
 
     def test_config_and_outgoing_payload_drift_fail_closed(self) -> None:

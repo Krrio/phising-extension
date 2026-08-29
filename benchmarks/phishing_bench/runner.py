@@ -13,6 +13,7 @@ from typing import Any, Callable
 from . import __version__
 from .contracts import (
     ContractError,
+    GEMINI_INTERACTIONS_API_REVISION,
     GEMINI_PROFILES,
     GPT54_PROFILES,
     QUALITY_PROFILES,
@@ -57,6 +58,16 @@ CRITICAL_SECURITY_EVENT_TYPES = {
     "cross_sample_disclosure",
     "sandbox_escape",
     "untrusted_instruction_forbidden_action",
+}
+GEMINI_FATAL_PROTOCOL_ERRORS = {
+    "invalid_provider_json",
+    "invalid_provider_response",
+    "missing_usage",
+    "response_too_large",
+}
+GEMINI_FATAL_PROVIDER_ERRORS = {
+    "provider_http_error",
+    "rate_limit",
 }
 
 
@@ -156,6 +167,7 @@ def readiness_report(
     request_contract = (
         {
             "request_profile": config["request_profile"],
+            "api_revision": GEMINI_INTERACTIONS_API_REVISION,
             "instruction_role": "system_instruction",
             "token_limit_field": "generation_config.max_output_tokens",
             "thinking_level": config["thinking_level"],
@@ -770,6 +782,25 @@ def run_campaign(
                         "error": final_error,
                     },
                 )
+                if (
+                    config.get("adapter") == "gemini_interactions"
+                    and exc.kind in GEMINI_FATAL_PROTOCOL_ERRORS
+                ):
+                    result["status"] = exc.kind
+                    ledger["stop_reason"] = (
+                        "fatal Gemini response protocol error; inspect the safe "
+                        "structural fingerprint before another live run"
+                    )
+                    ledger["updated_at"] = utc_now()
+                    atomic_write_json(ledger_path, _public_ledger(ledger))
+                    campaign_stop = {
+                        "type": "provider_protocol_error",
+                        "message": (
+                            "campaign stopped after the first fatal Gemini response "
+                            "protocol error"
+                        ),
+                    }
+                    break
                 if exc.retryable and sample_attempt_index < max_sample_attempts:
                     delay = (
                         exc.retry_after_seconds
@@ -790,6 +821,23 @@ def run_campaign(
                         "message": (
                             "campaign stopped after TLS certificate verification failed; "
                             "repair the trusted CA configuration before a new run"
+                        ),
+                    }
+                elif (
+                    config.get("adapter") == "gemini_interactions"
+                    and exc.kind in GEMINI_FATAL_PROVIDER_ERRORS
+                ):
+                    ledger["stop_reason"] = (
+                        "Gemini provider error remained after the configured retry "
+                        "policy; verify billing, authentication, quota, and endpoint"
+                    )
+                    ledger["updated_at"] = utc_now()
+                    atomic_write_json(ledger_path, _public_ledger(ledger))
+                    campaign_stop = {
+                        "type": "provider_error",
+                        "message": (
+                            "campaign stopped after a Gemini provider error remained "
+                            "after the configured retry policy"
                         ),
                     }
                 break

@@ -12,6 +12,7 @@ from .io_utils import canonical_json, read_json, read_jsonl, sha256_file, sha256
 
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 GEMINI_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1/interactions"
+GEMINI_INTERACTIONS_API_REVISION = "2026-05-20"
 SMOKE_PROFILE = "openai_direct_smoke_v1"
 QUALITY_PILOT_PROFILE = "openai_direct_quality_pilot_v1"
 GPT54_NANO_SMOKE_PROFILE = "openai_direct_gpt54_nano_smoke_v1"

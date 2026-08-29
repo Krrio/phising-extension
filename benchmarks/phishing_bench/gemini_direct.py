@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import ssl
@@ -8,7 +9,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .contracts import GEMINI_INTERACTIONS_ENDPOINT, ContractError
+from .contracts import (
+    GEMINI_INTERACTIONS_API_REVISION,
+    GEMINI_INTERACTIONS_ENDPOINT,
+    ContractError,
+)
 from .io_utils import sanitize_text
 from .openai_direct import ProviderError, ProviderResponse, validated_tls_context
 
@@ -26,6 +31,29 @@ INTERACTION_STATUSES = {
     "failed",
     "cancelled",
     "incomplete",
+}
+KNOWN_TOP_LEVEL_RESPONSE_KEYS = {
+    "background",
+    "categories",
+    "confidence",
+    "created",
+    "data",
+    "error",
+    "id",
+    "interaction",
+    "model",
+    "object",
+    "outputs",
+    "policyAssessment",
+    "reasoning",
+    "response",
+    "result",
+    "status",
+    "steps",
+    "trustScore",
+    "updated",
+    "usage",
+    "verdict",
 }
 
 
@@ -63,6 +91,24 @@ def _read_limited(handle: Any) -> bytes:
     return payload
 
 
+def _safe_top_level_shape(data: dict[str, Any]) -> str:
+    """Describe only protocol structure, never provider/model values."""
+
+    string_keys = sorted(key for key in data if isinstance(key, str))
+    known = sorted(set(string_keys) & KNOWN_TOP_LEVEL_RESPONSE_KEYS)
+    keyset_material = json.dumps(
+        string_keys,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(keyset_material).hexdigest()[:16]
+    known_summary = ",".join(known) if known else "none"
+    return (
+        f"top_level_key_count={len(string_keys)}; "
+        f"known_keys={known_summary}; keyset_sha256_prefix={digest}"
+    )
+
+
 def _retry_after(headers: Any) -> float | None:
     if headers is None:
         return None
@@ -83,7 +129,7 @@ def _required_token_count(usage: dict[str, Any], key: str) -> int:
         raise ProviderError(
             "missing_usage",
             f"Gemini usage.{key} is missing or invalid",
-            retryable=True,
+            retryable=False,
         )
     return value
 
@@ -94,7 +140,7 @@ def _optional_token_count(usage: dict[str, Any], key: str) -> int:
         raise ProviderError(
             "missing_usage",
             f"Gemini usage.{key} is invalid",
-            retryable=True,
+            retryable=False,
         )
     return value
 
@@ -105,7 +151,7 @@ def _mapped_usage(data: dict[str, Any]) -> dict[str, int]:
         raise ProviderError(
             "missing_usage",
             "Gemini success response did not contain usage",
-            retryable=True,
+            retryable=False,
         )
 
     input_tokens = _required_token_count(usage_raw, "total_input_tokens")
@@ -123,7 +169,7 @@ def _mapped_usage(data: dict[str, Any]) -> dict[str, int]:
         raise ProviderError(
             "missing_usage",
             "Gemini usage token counts are internally inconsistent",
-            retryable=True,
+            retryable=False,
         )
 
     return {
@@ -151,7 +197,7 @@ def _parse_steps(data: dict[str, Any], status: str) -> tuple[str, bool]:
         raise ProviderError(
             "invalid_provider_response",
             "Gemini response steps are missing or invalid",
-            retryable=True,
+            retryable=False,
         )
 
     tool_calls_present = False
@@ -161,7 +207,7 @@ def _parse_steps(data: dict[str, Any], status: str) -> tuple[str, bool]:
             raise ProviderError(
                 "invalid_provider_response",
                 "Gemini response contains an invalid step",
-                retryable=True,
+                retryable=False,
             )
         step_type = step["type"]
         tool_calls_present = tool_calls_present or _is_tool_step(step_type)
@@ -175,7 +221,7 @@ def _parse_steps(data: dict[str, Any], status: str) -> tuple[str, bool]:
             raise ProviderError(
                 "invalid_provider_response",
                 "Gemini model_output content is missing or invalid",
-                retryable=True,
+                retryable=False,
             )
         text_parts: list[str] = []
         for block in blocks:
@@ -183,7 +229,7 @@ def _parse_steps(data: dict[str, Any], status: str) -> tuple[str, bool]:
                 raise ProviderError(
                     "invalid_provider_response",
                     "Gemini model_output contains an invalid content block",
-                    retryable=True,
+                    retryable=False,
                 )
             if block["type"] == "text":
                 text = block.get("text")
@@ -191,7 +237,7 @@ def _parse_steps(data: dict[str, Any], status: str) -> tuple[str, bool]:
                     raise ProviderError(
                         "invalid_provider_response",
                         "Gemini model_output text block has no text",
-                        retryable=True,
+                        retryable=False,
                     )
                 text_parts.append(text)
         content = "".join(text_parts)
@@ -200,7 +246,7 @@ def _parse_steps(data: dict[str, Any], status: str) -> tuple[str, bool]:
         raise ProviderError(
             "invalid_provider_response",
             "Gemini completed response contained no model_output text",
-            retryable=True,
+            retryable=False,
         )
     return content, tool_calls_present
 
@@ -244,14 +290,19 @@ class GeminiInteractionsTransport:
                 "x-goog-api-key": api_key,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
+                "Api-Revision": GEMINI_INTERACTIONS_API_REVISION,
                 "User-Agent": "phishing-extension-benchmark/0.1",
             },
         )
         started = time.monotonic()
+        response_status: int | None = None
         try:
             with self._opener.open(request, timeout=timeout_seconds) as response:
                 raw = _read_limited(response)
                 headers = _safe_headers(response.headers)
+                status_value = getattr(response, "status", None)
+                if isinstance(status_value, int) and not isinstance(status_value, bool):
+                    response_status = status_value
         except urllib.error.HTTPError as exc:
             # Consume a bounded body for connection hygiene, but never parse, echo, or log it.
             _read_limited(exc)
@@ -313,13 +364,17 @@ class GeminiInteractionsTransport:
             raise ProviderError(
                 "invalid_provider_json",
                 "Gemini returned invalid JSON",
-                retryable=True,
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
             ) from exc
         if not isinstance(data, dict):
             raise ProviderError(
                 "invalid_provider_response",
                 "Gemini response is not an object",
-                retryable=True,
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
             )
 
         response_id = data.get("id")
@@ -328,24 +383,42 @@ class GeminiInteractionsTransport:
         if not isinstance(response_id, str) or not response_id:
             raise ProviderError(
                 "invalid_provider_response",
-                "Gemini response id is missing or invalid",
-                retryable=True,
+                "Gemini response id is missing or invalid; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
             )
         if not isinstance(resolved_model, str) or not resolved_model:
             raise ProviderError(
                 "invalid_provider_response",
-                "Gemini response model is missing or invalid",
-                retryable=True,
+                "Gemini response model is missing or invalid; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
             )
         if not isinstance(status, str) or status not in INTERACTION_STATUSES:
             raise ProviderError(
                 "invalid_provider_response",
-                "Gemini response status is missing or invalid",
-                retryable=True,
+                "Gemini response status is missing or invalid; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
             )
 
-        content, tool_calls_present = _parse_steps(data, status)
-        usage = _mapped_usage(data)
+        try:
+            content, tool_calls_present = _parse_steps(data, status)
+            usage = _mapped_usage(data)
+        except ProviderError as exc:
+            raise ProviderError(
+                exc.kind,
+                str(exc) + "; " + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            ) from exc
         finish_reason = {
             "completed": "stop",
             "incomplete": "incomplete",
