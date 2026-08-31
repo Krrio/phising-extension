@@ -5,7 +5,8 @@ description = "guardian_classic using crewAI"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [
-    "crewai[tools]==1.15.8",
+    "crewai[google-genai,tools]==1.15.8",
+    "google-genai==1.65.0",
     "idna>=3.10,<4.0.0",
     "python-levenshtein>=0.27.3",
     "python-whois>=0.9.6",

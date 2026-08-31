@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import json
 import re
 import uuid
@@ -12,6 +13,10 @@ from .io_utils import canonical_json, read_json, read_jsonl, sha256_file, sha256
 
 OPENAI_CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 GEMINI_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1/interactions"
+GEMINI_GENERATE_CONTENT_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1/models/"
+    "gemini-3.5-flash-lite:generateContent"
+)
 GEMINI_INTERACTIONS_API_REVISION = "2026-05-20"
 SMOKE_PROFILE = "openai_direct_smoke_v1"
 QUALITY_PILOT_PROFILE = "openai_direct_quality_pilot_v1"
@@ -29,14 +34,36 @@ GEMINI35_FLASH_LITE_SMOKE_PROFILE = (
 GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE = (
     "gemini_direct_gemini35_flash_lite_quality_pilot_v1"
 )
+GEMINI31_FLASH_LITE_SMOKE_PROFILE = (
+    "gemini_direct_gemini31_flash_lite_smoke_v1"
+)
+GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE = (
+    "gemini_direct_gemini31_flash_lite_quality_pilot_v1"
+)
+GEMINI37_FLASH_SMOKE_PROFILE = "gemini_direct_gemini37_flash_smoke_v1"
+GEMINI37_FLASH_QUALITY_PILOT_PROFILE = (
+    "gemini_direct_gemini37_flash_quality_pilot_v1"
+)
 CREWAI_SMOKE_PROFILE = "crewai_offline_smoke_v1"
 CREWAI_QUALITY_PILOT_PROFILE = "crewai_offline_quality_pilot_v1"
+CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE = (
+    "crewai_gemini35_flash_lite_offline_smoke_v1"
+)
+CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE = (
+    "crewai_gemini35_flash_lite_offline_quality_pilot_v1"
+)
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"
 # Kept as a public alias for compatibility with the already frozen nano tests/runs.
 GPT54_NANO_REQUEST_PROFILE = GPT54_REASONING_NONE_REQUEST_PROFILE
 GPT54_MINI_REQUEST_PROFILE = GPT54_REASONING_NONE_REQUEST_PROFILE
 GEMINI_INTERACTIONS_REQUEST_PROFILE = (
     "gemini_interactions_v1_structured_minimal_v1"
+)
+GEMINI_INTERACTIONS_LOW_REQUEST_PROFILE = (
+    "gemini_interactions_v1_structured_low_v1"
+)
+CREWAI_GEMINI_GENERATE_CONTENT_REQUEST_PROFILE = (
+    "crewai_native_gemini_generate_content_structured_minimal_v1"
 )
 GPT54_NANO_PROFILES = {
     GPT54_NANO_SMOKE_PROFILE,
@@ -50,22 +77,39 @@ GPT54_PROFILES = GPT54_NANO_PROFILES | GPT54_MINI_PROFILES
 GEMINI_PROFILES = {
     GEMINI35_FLASH_LITE_SMOKE_PROFILE,
     GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
+    GEMINI31_FLASH_LITE_SMOKE_PROFILE,
+    GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
+    GEMINI37_FLASH_SMOKE_PROFILE,
+    GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
 }
+CREWAI_OPENAI_PROFILES = {CREWAI_SMOKE_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
+CREWAI_GEMINI_PROFILES = {
+    CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+    CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
+}
+CREWAI_PROFILES = CREWAI_OPENAI_PROFILES | CREWAI_GEMINI_PROFILES
 DIRECT_SMOKE_PROFILES = {
     SMOKE_PROFILE,
     GPT54_NANO_SMOKE_PROFILE,
     GPT54_MINI_SMOKE_PROFILE,
     GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+    GEMINI31_FLASH_LITE_SMOKE_PROFILE,
+    GEMINI37_FLASH_SMOKE_PROFILE,
 }
 QUALITY_PROFILES = {
     QUALITY_PILOT_PROFILE,
     GPT54_NANO_QUALITY_PILOT_PROFILE,
     GPT54_MINI_QUALITY_PILOT_PROFILE,
     GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
+    GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
+    GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
     CREWAI_QUALITY_PILOT_PROFILE,
+    CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
 }
-CREWAI_PROFILES = {CREWAI_SMOKE_PROFILE, CREWAI_QUALITY_PILOT_PROFILE}
-SMOKE_PROFILES = DIRECT_SMOKE_PROFILES | {CREWAI_SMOKE_PROFILE}
+SMOKE_PROFILES = DIRECT_SMOKE_PROFILES | {
+    CREWAI_SMOKE_PROFILE,
+    CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+}
 CATEGORIES = {
     "credential_request",
     "urgency",
@@ -105,6 +149,25 @@ IPV4_RE = re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)")
 
 class ContractError(ValueError):
     pass
+
+
+def assert_pricing_current_for_run(
+    config: dict[str, Any], *, today: date | None = None
+) -> None:
+    """Block new paid runs after a frozen time-limited price expires."""
+
+    valid_through = config.get("pricing_valid_through")
+    if valid_through is None:
+        return
+    try:
+        expiry = date.fromisoformat(str(valid_through))
+    except ValueError as exc:
+        raise ContractError("invalid pricing_valid_through date") from exc
+    if (today or date.today()) > expiry:
+        raise ContractError(
+            f"frozen promotional pricing expired on {expiry.isoformat()}; "
+            "create a new campaign with a current pricing snapshot"
+        )
 
 
 def _normalized_key(key: str) -> str:
@@ -226,11 +289,13 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     }
     evaluation_profile = config.get("evaluation_profile", SMOKE_PROFILE)
     is_crewai = evaluation_profile in CREWAI_PROFILES
+    is_crewai_gemini = evaluation_profile in CREWAI_GEMINI_PROFILES
     is_quality = evaluation_profile in QUALITY_PROFILES
     is_gpt54_nano = evaluation_profile in GPT54_NANO_PROFILES
     is_gpt54_mini = evaluation_profile in GPT54_MINI_PROFILES
     is_gpt54 = evaluation_profile in GPT54_PROFILES
     is_gemini = evaluation_profile in GEMINI_PROFILES
+    is_google = is_gemini or is_crewai_gemini
     if is_quality:
         required |= {
             "evaluation_profile",
@@ -239,9 +304,12 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         }
     elif evaluation_profile in {
         CREWAI_SMOKE_PROFILE,
+        CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE,
         GPT54_NANO_SMOKE_PROFILE,
         GPT54_MINI_SMOKE_PROFILE,
         GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+        GEMINI31_FLASH_LITE_SMOKE_PROFILE,
+        GEMINI37_FLASH_SMOKE_PROFILE,
     }:
         required |= {"evaluation_profile", "expected_sample_count"}
     elif evaluation_profile != SMOKE_PROFILE:
@@ -250,6 +318,13 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         required |= {"request_profile", "reasoning_effort"}
     if is_gemini:
         required |= {"request_profile", "thinking_level", "seed"}
+    if is_crewai_gemini:
+        required |= {"request_profile", "thinking_level"}
+    if evaluation_profile in {
+        GEMINI37_FLASH_SMOKE_PROFILE,
+        GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
+    }:
+        required |= {"pricing_valid_through"}
     if is_crewai:
         required |= {
             "crewai_version",
@@ -265,7 +340,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     assert_no_label_keys(config)
     if config["schema_version"] != "1.0" or config["stage"] != "ENGINEERING_PILOT":
         raise ContractError("unsupported runtime config version or stage")
-    expected_provider = "google" if is_gemini else "openai"
+    expected_provider = "google" if is_google else "openai"
     expected_adapter = (
         "gemini_interactions"
         if is_gemini
@@ -279,7 +354,9 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     ):
         raise ContractError("provider/adapter differs from the frozen evaluation profile")
     expected_endpoint = (
-        GEMINI_INTERACTIONS_ENDPOINT
+        GEMINI_GENERATE_CONTENT_ENDPOINT
+        if is_crewai_gemini
+        else GEMINI_INTERACTIONS_ENDPOINT
         if is_gemini
         else OPENAI_CHAT_COMPLETIONS_ENDPOINT
     )
@@ -287,7 +364,13 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         raise ContractError("endpoint differs from the frozen evaluation profile")
     parsed_endpoint = urlparse(config["endpoint"])
     expected_endpoint_parts = (
-        ("https", "generativelanguage.googleapis.com", "/v1/interactions")
+        (
+            "https",
+            "generativelanguage.googleapis.com",
+            "/v1/models/gemini-3.5-flash-lite:generateContent",
+        )
+        if is_crewai_gemini
+        else ("https", "generativelanguage.googleapis.com", "/v1/interactions")
         if is_gemini
         else ("https", "api.openai.com", "/v1/chat/completions")
     )
@@ -300,10 +383,8 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     model = config["requested_model"]
     if not isinstance(model, str):
         raise ContractError("requested_model must be a string")
-    if is_gemini:
-        if model != "gemini-3.5-flash-lite" or any(
-            marker in model for marker in ("latest", "preview", "experimental")
-        ):
+    if is_google:
+        if any(marker in model for marker in ("latest", "preview", "experimental")):
             raise ContractError(
                 "Gemini requested_model must be the frozen stable model ID"
             )
@@ -318,16 +399,22 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         GPT54_MINI_QUALITY_PILOT_PROFILE: "gpt-5.4-mini-2026-03-17",
         GEMINI35_FLASH_LITE_SMOKE_PROFILE: "gemini-3.5-flash-lite",
         GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE: "gemini-3.5-flash-lite",
+        GEMINI31_FLASH_LITE_SMOKE_PROFILE: "gemini-3.1-flash-lite",
+        GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE: "gemini-3.1-flash-lite",
+        GEMINI37_FLASH_SMOKE_PROFILE: "gemini-3.7-flash",
+        GEMINI37_FLASH_QUALITY_PILOT_PROFILE: "gemini-3.7-flash",
+        CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE: "gemini-3.5-flash-lite",
+        CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE: "gemini-3.5-flash-lite",
     }.get(evaluation_profile, "gpt-4o-mini-2024-07-18")
     if model != expected_model:
         raise ContractError("requested_model differs from the frozen evaluation profile")
-    expected_key_env = "GEMINI_API_KEY" if is_gemini else "OPENAI_API_KEY"
+    expected_key_env = "GEMINI_API_KEY" if is_google else "OPENAI_API_KEY"
     if config["api_key_env"] != expected_key_env:
         raise ContractError(f"API key must come from {expected_key_env}")
     if (
         (
             config["temperature"] is not None
-            if is_gemini
+            if is_google
             else isinstance(config["temperature"], bool)
             or not isinstance(config["temperature"], (int, float))
             or config["temperature"] != 0
@@ -336,7 +423,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         or not isinstance(config["concurrency"], int)
         or config["concurrency"] != 1
     ):
-        expected_temperature = "provider default" if is_gemini else "0"
+        expected_temperature = "provider default" if is_google else "0"
         raise ContractError(
             f"frozen profile requires temperature={expected_temperature} and concurrency=1"
         )
@@ -345,13 +432,30 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         or config["reasoning_effort"] != "none"
     ):
         raise ContractError("GPT-5.4 request profile/reasoning drift")
+    expected_gemini_request_profile = (
+        GEMINI_INTERACTIONS_LOW_REQUEST_PROFILE
+        if evaluation_profile
+        in {GEMINI37_FLASH_SMOKE_PROFILE, GEMINI37_FLASH_QUALITY_PILOT_PROFILE}
+        else GEMINI_INTERACTIONS_REQUEST_PROFILE
+    )
+    expected_gemini_thinking = (
+        "low"
+        if evaluation_profile
+        in {GEMINI37_FLASH_SMOKE_PROFILE, GEMINI37_FLASH_QUALITY_PILOT_PROFILE}
+        else "minimal"
+    )
     if is_gemini and (
-        config["request_profile"] != GEMINI_INTERACTIONS_REQUEST_PROFILE
-        or config["thinking_level"] != "minimal"
+        config["request_profile"] != expected_gemini_request_profile
+        or config["thinking_level"] != expected_gemini_thinking
         or isinstance(config["seed"], bool)
         or config["seed"] != 0
     ):
         raise ContractError("Gemini Interactions request profile drift")
+    if is_crewai_gemini and (
+        config["request_profile"] != CREWAI_GEMINI_GENERATE_CONTENT_REQUEST_PROFILE
+        or config["thinking_level"] != "minimal"
+    ):
+        raise ContractError("CrewAI Gemini request profile drift")
     if (
         isinstance(config["max_output_tokens"], bool)
         or not isinstance(config["max_output_tokens"], int)
@@ -395,19 +499,41 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             raise ContractError("CrewAI Offline requires the frozen CrewAI 1.15.8")
         if config["framework_config"] != expected_framework:
             raise ContractError("CrewAI framework_config drift")
-        if config["system_bundle_delta"] != {
-            "comparison_name": "system_bundle_delta",
-            "same_model_snapshot": True,
-            "same_runner_dataset": True,
-            "same_response_schema": True,
-            "same_decision_policy": True,
-            "same_prompt": False,
-            "additional_components": [
-                "benchmark_specific_role_and_task_prompts",
-                "three_role_sequential_orchestration",
-                "frozen_reserved_domain_evidence",
-            ],
-        }:
+        expected_bundle_delta = (
+            {
+                "comparison_name": "cross_api_system_bundle_delta",
+                "same_model_id": True,
+                "same_runner_dataset": True,
+                "same_response_schema_semantics": True,
+                "same_wire_response_schema": False,
+                "same_decision_policy": True,
+                "same_prompt": False,
+                "same_provider_api": False,
+                "direct_api": "interactions_v1",
+                "crewai_api": "native_generate_content_v1",
+                "additional_components": [
+                    "benchmark_specific_role_and_task_prompts",
+                    "three_role_sequential_orchestration",
+                    "frozen_reserved_domain_evidence",
+                    "crewai_native_gemini_provider_translation",
+                ],
+            }
+            if is_crewai_gemini
+            else {
+                "comparison_name": "system_bundle_delta",
+                "same_model_snapshot": True,
+                "same_runner_dataset": True,
+                "same_response_schema": True,
+                "same_decision_policy": True,
+                "same_prompt": False,
+                "additional_components": [
+                    "benchmark_specific_role_and_task_prompts",
+                    "three_role_sequential_orchestration",
+                    "frozen_reserved_domain_evidence",
+                ],
+            }
+        )
+        if config["system_bundle_delta"] != expected_bundle_delta:
             raise ContractError("CrewAI system_bundle_delta disclosure drift")
     elif config["max_retries_per_sample"] not in {0, 1}:
         raise ContractError("Direct profiles allow at most one retry per sample")
@@ -418,6 +544,8 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             raise ContractError("quality pilot requires request_timeout_seconds=45")
     if is_crewai and config["request_timeout_seconds"] != 45:
         raise ContractError("CrewAI Offline requires request_timeout_seconds=45")
+    if is_crewai and config["max_output_tokens"] != 500:
+        raise ContractError("CrewAI Offline requires max_output_tokens=500")
     budget = config["budget"]
     if not isinstance(budget, dict) or set(budget) != {"max_attempts", "max_cost_usd", "max_wall_seconds"}:
         raise ContractError("invalid budget contract")
@@ -428,11 +556,7 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             or not 1 <= budget["max_attempts"] <= 10
         ):
             raise ContractError("smoke max_attempts must be in 1..10")
-        if evaluation_profile in {
-            GPT54_NANO_SMOKE_PROFILE,
-            GPT54_MINI_SMOKE_PROFILE,
-            GEMINI35_FLASH_LITE_SMOKE_PROFILE,
-        }:
+        if evaluation_profile != SMOKE_PROFILE:
             if config["expected_sample_count"] != 5:
                 raise ContractError("direct challenger smoke requires expected_sample_count=5")
             if budget["max_attempts"] != 10:
@@ -477,15 +601,27 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             or not 1 <= budget["max_wall_seconds"] <= 1800
         ):
             raise ContractError("smoke max_wall_seconds must be in 1..1800")
-        expected_smoke_cost_cap = 0.10 if (is_gpt54_mini or is_gemini) else 0.05
-        if (is_crewai or is_gpt54 or is_gemini) and float(budget["max_cost_usd"]) != expected_smoke_cost_cap:
+        expected_smoke_cost_cap = {
+            GPT54_NANO_SMOKE_PROFILE: 0.05,
+            GPT54_MINI_SMOKE_PROFILE: 0.10,
+            GEMINI35_FLASH_LITE_SMOKE_PROFILE: 0.10,
+            GEMINI31_FLASH_LITE_SMOKE_PROFILE: 0.05,
+            GEMINI37_FLASH_SMOKE_PROFILE: 0.10,
+            CREWAI_SMOKE_PROFILE: 0.05,
+            CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE: 0.10,
+        }.get(evaluation_profile)
+        if expected_smoke_cost_cap is not None and float(budget["max_cost_usd"]) != expected_smoke_cost_cap:
             raise ContractError(
                 f"frozen smoke profile requires max_cost_usd={expected_smoke_cost_cap:.2f}"
             )
     else:
-        expected_quality_cost_cap = (
-            0.65 if is_gpt54_mini else 0.30 if is_gemini else 0.25
-        )
+        expected_quality_cost_cap = {
+            GPT54_MINI_QUALITY_PILOT_PROFILE: 0.65,
+            GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE: 0.30,
+            GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE: 0.25,
+            GEMINI37_FLASH_QUALITY_PILOT_PROFILE: 0.65,
+            CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE: 0.50,
+        }.get(evaluation_profile, 0.25)
         if float(budget["max_cost_usd"]) != expected_quality_cost_cap:
             raise ContractError(
                 "quality pilot requires "
@@ -499,6 +635,24 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             raise ContractError("quality pilot requires max_wall_seconds=7200")
     security = config["security"]
     expected_security = (
+        {
+            "store": False,
+            "provider_state_mode": "explicit_store_false_request_override",
+            "store_enforcement": "http_options_extra_body_root",
+            "tools_enabled": True,
+            "tool_mode": "runner_precomputed_frozen_evidence_only",
+            "live_domain_network": False,
+            "provider_egress": "generativelanguage.googleapis.com_only",
+            "provider_api": "native_generate_content_v1",
+            "crewai_anonymous_telemetry": False,
+            "crewai_first_run_tracing": False,
+            "crewai_task_output_persistence": False,
+            "external_processing_allowed": True,
+            "data_class": "synthetic_reserved_domains_only",
+            "stop_on_critical_event": True,
+        }
+        if is_crewai_gemini
+        else
         {
             "store": False,
             "tools_enabled": True,
@@ -537,13 +691,27 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         for key in ("input", "cached_input", "output")
     ):
         raise ContractError("invalid pricing snapshot")
-    if is_gemini:
-        expected_pricing = (
-            0.30,
-            0.03,
-            2.50,
-            "https://ai.google.dev/gemini-api/docs/pricing",
-        )
+    if is_google:
+        expected_pricing = {
+            "gemini-3.1-flash-lite": (
+                0.25,
+                0.025,
+                1.50,
+                "https://ai.google.dev/gemini-api/docs/pricing",
+            ),
+            "gemini-3.5-flash-lite": (
+                0.30,
+                0.03,
+                2.50,
+                "https://ai.google.dev/gemini-api/docs/pricing",
+            ),
+            "gemini-3.7-flash": (
+                0.75,
+                0.075,
+                3.75,
+                "https://ai.google.dev/gemini-api/docs/pricing",
+            ),
+        }[model]
     elif is_gpt54_nano:
         expected_pricing = (
             0.20,
@@ -574,8 +742,22 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         raise ContractError("pricing differs from the frozen provider snapshot")
     if is_gpt54 and pricing["source_checked_at"] != "2026-08-28":
         raise ContractError("GPT-5.4 pricing check date drift")
-    if is_gemini and pricing["source_checked_at"] != "2026-08-29":
+    expected_google_pricing_date = (
+        "2026-08-29"
+        if evaluation_profile
+        in {
+            GEMINI35_FLASH_LITE_SMOKE_PROFILE,
+            GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE,
+        }
+        else "2026-08-30"
+    )
+    if is_google and pricing["source_checked_at"] != expected_google_pricing_date:
         raise ContractError("Gemini pricing check date drift")
+    if evaluation_profile in {
+        GEMINI37_FLASH_SMOKE_PROFILE,
+        GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
+    } and config["pricing_valid_through"] != "2026-12-31":
+        raise ContractError("Gemini 3.7 promotional pricing validity drift")
 
     resolved: dict[str, Path] = {}
     asset_path_keys = [
@@ -728,6 +910,17 @@ def build_crewai_workflow_contract(
         "response_format": response_schema,
         "record": record,
     }
+    if config.get("evaluation_profile") in CREWAI_GEMINI_PROFILES:
+        workflow.update(
+            {
+                "provider": "google",
+                "provider_api": "native_generate_content_v1",
+                "store_enforcement": "http_options_extra_body_root",
+                "request_profile": config["request_profile"],
+                "thinking_level": config["thinking_level"],
+                "thinking_summaries": "none",
+            }
+        )
     assert_no_label_keys(workflow)
     return workflow
 
@@ -761,7 +954,7 @@ def validate_outgoing_request(config: dict[str, Any], body: dict[str, Any]) -> N
         if not isinstance(generation, dict) or generation != {
             "max_output_tokens": config["max_output_tokens"],
             "seed": 0,
-            "thinking_level": "minimal",
+            "thinking_level": config["thinking_level"],
             "thinking_summaries": "none",
         }:
             raise ContractError("Gemini generation_config drift")

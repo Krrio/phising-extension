@@ -774,8 +774,11 @@ def score_run(
         if technical_failure_count
         else ""
     )
+    crewai_google = is_crewai and runtime_config.get("provider") == "google"
     report_title = (
-        "Raport CrewAI Offline smoke"
+        "Raport CrewAI Offline + Google Gemini smoke"
+        if crewai_google
+        else "Raport CrewAI Offline + OpenAI smoke"
         if is_crewai
         else "Raport Google Gemini Direct smoke"
         if is_gemini
@@ -787,6 +790,12 @@ def score_run(
         else f"outbound attempts: {attempts}, w tym retry: {retry_attempts}"
     )
     track_note = (
+        " To jest pomiar całego bundle CrewAI+Gemini: ten sam model ID, dataset, "
+        "semantyka schema i decision policy co Direct, ale GenerateContent v1 ma "
+        "inne wire schema; dochodzą osobne prompty, trzy role i frozen evidence. "
+        "Jest to `cross_api_system_bundle_delta`, nie czysta delta frameworka."
+        if crewai_google
+        else
         " To jest pomiar całego bundle CrewAI: ten sam snapshot, dataset, schema i "
         "decision policy co Direct, ale osobne prompty ról/zadań, trzy role oraz "
         "frozen evidence; nie jest to czysta delta frameworka."

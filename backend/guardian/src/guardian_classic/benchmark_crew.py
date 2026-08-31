@@ -9,21 +9,46 @@ provider.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 import sqlite3
+import ssl
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 from crewai import Agent, Crew, LLM, Process, Task
 from crewai.llms.base_llm import BaseLLM
-from pydantic import PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 EXPECTED_AGENT_KEYS = ("domain_analyst", "content_analyst", "orchestrator")
 EXPECTED_TASK_KEYS = ("domain_analysis", "content_analysis", "synthesis")
 _ORIGINAL_SQLITE_CONNECT = sqlite3.connect
+
+
+class BenchmarkVerdict(BaseModel):
+    """Native Gemini structured output matching the frozen benchmark schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trustScore: int = Field(ge=0, le=100)
+    verdict: Literal["safe", "suspicious", "phishing"]
+    confidence: float = Field(ge=0, le=1)
+    reasoning: str
+    categories: list[
+        Literal[
+            "credential_request",
+            "urgency",
+            "impersonation",
+            "suspicious_link",
+            "suspicious_domain",
+            "financial",
+        ]
+    ]
+    policyAssessment: None
 
 
 class _ClosingSQLiteConnection(sqlite3.Connection):
@@ -166,13 +191,26 @@ class BenchmarkCrewBundle:
     call_budget: BenchmarkCallBudget
 
     def close(self) -> None:
-        """Close eager native OpenAI clients created by CrewAI for this sample."""
+        """Close eager provider clients and scrub their credential references."""
 
         for agent in self.crew.agents:
             llm = agent.llm
             if not isinstance(llm, GuardedBenchmarkLLM):
                 continue
             delegate = llm.delegate
+            if getattr(delegate, "provider", None) == "gemini":
+                # google-genai exposes sync and async transports through the
+                # same Client. Both must be closed explicitly.
+                client = getattr(delegate, "_client", None)
+                if client is not None:
+                    client.close()
+                    close_result = client.aio.aclose()
+                    if inspect.isawaitable(close_result):
+                        asyncio.run(close_result)
+                    delegate._client = None
+                delegate.api_key = None
+                llm.api_key = None
+                continue
             sync_client = getattr(delegate, "_client", None)
             if sync_client is not None:
                 sync_client.close()
@@ -183,6 +221,8 @@ class BenchmarkCrewBundle:
                 if inspect.isawaitable(close_result):
                     asyncio.run(close_result)
                 delegate._async_client = None
+            delegate.api_key = None
+            llm.api_key = None
         self.crew._task_output_handler.reset()
 
 
@@ -219,12 +259,15 @@ def build_benchmark_crew(
     *,
     api_key: str,
     requested_model: str,
-    temperature: float,
+    temperature: float | None,
     max_output_tokens: int,
     request_timeout_seconds: float,
     max_llm_calls: int,
     response_schema: dict[str, Any],
     profile: dict[str, Any],
+    provider: str = "openai",
+    thinking_level: str | None = None,
+    tls_context: ssl.SSLContext | None = None,
 ) -> BenchmarkCrewBundle:
     """Build one fresh, memoryless three-agent crew for one sample."""
 
@@ -263,12 +306,92 @@ def build_benchmark_crew(
         raise ValueError("benchmark response format differs from frozen schema")
 
     call_budget = BenchmarkCallBudget(max_calls=max_llm_calls)
-    # With an explicit native provider CrewAI 1.15.8 forwards ``model`` as-is.
-    # Therefore use the exact OpenAI snapshot ID here; an ``openai/`` prefix
-    # would reach the API and fail as an unknown model.
     model = requested_model
 
     def make_llm(role: str, *, structured: bool) -> GuardedBenchmarkLLM:
+        if provider == "google":
+            if temperature is not None or thinking_level != "minimal":
+                raise ValueError("native Gemini benchmark generation profile drift")
+            if tls_context is None:
+                raise ValueError("native Gemini benchmark requires a verified TLS context")
+            if (
+                not tls_context.check_hostname
+                or tls_context.verify_mode != ssl.CERT_REQUIRED
+                or int(tls_context.cert_store_stats().get("x509_ca", 0)) <= 0
+            ):
+                raise ValueError("native Gemini benchmark TLS verification drift")
+
+            import httpx
+            from google.genai import types
+
+            # A custom async HTTPX transport disables google-genai's optional
+            # aiohttp path (whose session otherwise hard-codes trust_env=True).
+            # The SDK still owns and closes the AsyncClient and its transport.
+            async_transport = httpx.AsyncHTTPTransport(
+                verify=tls_context,
+                retries=0,
+            )
+            http_options = types.HttpOptions(
+                api_version="v1",
+                timeout=int(request_timeout_seconds * 1000),
+                retry_options=types.HttpRetryOptions(attempts=1),
+                client_args={
+                    "verify": tls_context,
+                    "trust_env": False,
+                    "follow_redirects": False,
+                },
+                async_client_args={
+                    "verify": tls_context,
+                    "trust_env": False,
+                    "follow_redirects": False,
+                    "transport": async_transport,
+                },
+                # google-genai 1.65.0 does not yet type this new root field,
+                # but HttpOptions.extra_body is recursively merged into the
+                # GenerateContent request body.
+                extra_body={"store": False},
+            )
+            thinking_config = types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel.MINIMAL,
+                include_thoughts=False,
+            )
+            delegate = LLM(
+                model=model,
+                provider="gemini",
+                api_key=api_key,
+                temperature=None,
+                max_output_tokens=max_output_tokens,
+                stream=False,
+                response_format=BenchmarkVerdict if structured else None,
+                thinking_config=thinking_config,
+                client_params={"http_options": http_options},
+                use_vertexai=False,
+            )
+            return GuardedBenchmarkLLM(
+                call_budget=call_budget,
+                benchmark_role=role,
+                delegate=delegate,
+                model=model,
+                provider="gemini",
+                api_key=api_key,
+                temperature=None,
+                max_tokens=max_output_tokens,
+                timeout=request_timeout_seconds,
+                stream=False,
+                additional_params={
+                    "api": "native_generate_content_v1",
+                    "provider_max_attempts": 1,
+                    "store": False,
+                    "thinking_level": "minimal",
+                    "include_thoughts": False,
+                    "use_vertexai": False,
+                },
+            )
+
+        if provider != "openai":
+            raise ValueError(f"unsupported benchmark provider: {provider}")
+        if temperature != 0 or thinking_level is not None or tls_context is not None:
+            raise ValueError("native OpenAI benchmark generation profile drift")
         # Send the exact frozen Direct schema instead of letting CrewAI add
         # Pydantic titles/descriptions that would change the comparison bundle.
         provider_params: dict[str, Any] = {"store": False}
@@ -422,25 +545,186 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
             or agent.guardrail_max_retries != 0
             or agent.cache
             or agent.memory not in (False, None)
+            or llm.stream
+            or llm.delegate.model != llm.model
+            or llm.delegate.temperature != llm.temperature
+            or llm.delegate.stream
+        ):
+            raise ValueError(f"effective CrewAI agent profile drift: {expected_key}")
+
+        if llm.delegate.provider == "gemini":
+            from google.genai import types
+
+            expected_outer_params = {
+                "api": "native_generate_content_v1",
+                "provider_max_attempts": 1,
+                "store": False,
+                "thinking_level": "minimal",
+                "include_thoughts": False,
+                "use_vertexai": False,
+            }
+            response_format = getattr(llm.delegate, "response_format", None)
+            expected_response_format = (
+                BenchmarkVerdict if expected_key == "orchestrator" else None
+            )
+            generation_config = llm.delegate._prepare_generation_config(
+                response_model=response_format
+            )
+            wire_response_schema = generation_config.response_json_schema
+            structured = expected_key == "orchestrator"
+            thinking = getattr(llm.delegate, "thinking_config", None)
+            client_params = getattr(llm.delegate, "client_params", None)
+            http_options = (
+                client_params.get("http_options")
+                if isinstance(client_params, dict)
+                else None
+            )
+            client_args = getattr(http_options, "client_args", None)
+            async_client_args = getattr(http_options, "async_client_args", None)
+            sync_verify = (
+                client_args.get("verify") if isinstance(client_args, dict) else None
+            )
+            async_verify = (
+                async_client_args.get("verify")
+                if isinstance(async_client_args, dict)
+                else None
+            )
+            native_client = getattr(llm.delegate, "_client", None)
+            api_client = getattr(native_client, "_api_client", None)
+            effective_http = getattr(api_client, "_http_options", None)
+            wire_probe = (
+                api_client._build_request(
+                    "post",
+                    f"models/{llm.model}:generateContent",
+                    {"contents": []},
+                )
+                if api_client is not None
+                else None
+            )
+            if (
+                llm.provider != "gemini"
+                or llm.temperature is not None
+                or llm.base_url is not None
+                or llm.max_tokens != 500
+                or llm.timeout != 45
+                or llm.additional_params != expected_outer_params
+                or getattr(llm.delegate, "max_output_tokens", None) != 500
+                or getattr(llm.delegate, "use_vertexai", None) is not False
+                or getattr(llm.delegate, "project", None) is not None
+                or response_format is not expected_response_format
+                or generation_config.max_output_tokens != 500
+                or generation_config.temperature is not None
+                or generation_config.tools is not None
+                or generation_config.thinking_config is None
+                or generation_config.thinking_config.thinking_level
+                != types.ThinkingLevel.MINIMAL
+                or generation_config.thinking_config.include_thoughts is not False
+                or (generation_config.response_mime_type == "application/json")
+                is not structured
+                or (isinstance(wire_response_schema, dict)) is not structured
+                or generation_config.response_schema is not None
+                or not isinstance(thinking, types.ThinkingConfig)
+                or thinking.thinking_level != types.ThinkingLevel.MINIMAL
+                or thinking.include_thoughts is not False
+                or not isinstance(http_options, types.HttpOptions)
+                or http_options.api_version != "v1"
+                or http_options.timeout != 45_000
+                or http_options.extra_body != {"store": False}
+                or http_options.retry_options is None
+                or http_options.retry_options.attempts != 1
+                or not isinstance(client_args, dict)
+                or client_args.get("trust_env") is not False
+                or client_args.get("follow_redirects") is not False
+                or not isinstance(sync_verify, ssl.SSLContext)
+                or not sync_verify.check_hostname
+                or sync_verify.verify_mode != ssl.CERT_REQUIRED
+                or not isinstance(async_client_args, dict)
+                or async_client_args.get("trust_env") is not False
+                or async_client_args.get("follow_redirects") is not False
+                or not isinstance(async_verify, ssl.SSLContext)
+                or async_verify is not sync_verify
+                or async_client_args.get("transport") is None
+                or native_client is None
+                or native_client.vertexai
+                or effective_http is None
+                or effective_http.api_version != "v1"
+                or effective_http.extra_body != {"store": False}
+                or effective_http.retry_options is None
+                or effective_http.retry_options.attempts != 1
+                or api_client._use_aiohttp()
+                or wire_probe is None
+                or wire_probe.url
+                != (
+                    "https://generativelanguage.googleapis.com/"
+                    f"v1/models/{llm.model}:generateContent"
+                )
+                or not isinstance(wire_probe.data, dict)
+                or wire_probe.data.get("store") is not False
+            ):
+                raise ValueError(
+                    f"effective CrewAI Gemini provider profile drift: {expected_key}"
+                )
+            schema_sha256 = (
+                hashlib.sha256(
+                    json.dumps(
+                        wire_response_schema,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                if structured
+                else None
+            )
+            agent_rows.append(
+                {
+                    "benchmark_role": expected_key,
+                    "crewai_role": agent.role,
+                    "model": llm.model,
+                    "provider": llm.provider,
+                    "api": "native_generate_content_v1",
+                    "store": http_options.extra_body["store"],
+                    "wire_store_false_verified": True,
+                    "provider_max_attempts": http_options.retry_options.attempts,
+                    "api_version": http_options.api_version,
+                    "use_vertexai": llm.delegate.use_vertexai,
+                    "trust_env": client_args["trust_env"],
+                    "follow_redirects": client_args["follow_redirects"],
+                    "async_transport": "httpx",
+                    "max_iter": agent.max_iter,
+                    "max_retry_limit": agent.max_retry_limit,
+                    "max_execution_time": agent.max_execution_time,
+                    "max_tokens": llm.max_tokens,
+                    "timeout": llm.timeout,
+                    "thinking_level": "minimal",
+                    "include_thoughts": thinking.include_thoughts,
+                    "wire_tools": "absent",
+                    "response_schema_sha256": schema_sha256,
+                    "response_format": (
+                        "strict_json_schema"
+                        if expected_key == "orchestrator"
+                        else "text"
+                    ),
+                }
+            )
+            continue
+
+        delegate_params = getattr(llm.delegate, "additional_params", None)
+        if (
+            llm.delegate.provider != "openai"
+            or llm.provider != "openai"
             or llm.temperature != 0
             or llm.base_url != "https://api.openai.com/v1"
-            or llm.stream
             or llm.additional_params != {"max_retries": 0, "store": False}
             or getattr(llm.delegate, "max_retries", None) != 0
             or getattr(llm.delegate, "store", None) is not False
             or getattr(llm.delegate, "api", None) != "completions"
             or getattr(llm.delegate, "custom_openai", None) is not True
-            or llm.delegate.provider != "openai"
-            or llm.delegate.model != llm.model
             or llm.delegate.base_url != "https://api.openai.com/v1"
-            or llm.delegate.temperature != llm.temperature
             or llm.delegate.max_tokens != llm.max_tokens
             or llm.delegate.timeout != llm.timeout
-            or llm.delegate.stream
+            or not isinstance(delegate_params, dict)
         ):
-            raise ValueError(f"effective CrewAI agent profile drift: {expected_key}")
-        delegate_params = getattr(llm.delegate, "additional_params", None)
-        if not isinstance(delegate_params, dict):
             raise ValueError(f"effective CrewAI provider params drift: {expected_key}")
         expected_delegate_params: dict[str, Any] = {"store": False}
         if expected_key == "orchestrator":

@@ -447,6 +447,12 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
     architecture_same = len(set(architectures)) == 1
     model_same = len(set(models)) == 1
     provider_same = len(set(providers)) == 1
+    disclosed_cross_api_delta = any(
+        isinstance(config.get("system_bundle_delta"), dict)
+        and config["system_bundle_delta"].get("comparison_name")
+        == "cross_api_system_bundle_delta"
+        for config in runtime_configs
+    )
     comparison_type = (
         "model_or_provider_delta"
         if prompt_same
@@ -457,6 +463,11 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         )
         else "replication"
         if prompt_same and adapter_same and model_same and provider_same
+        else "cross_api_system_bundle_delta"
+        if disclosed_cross_api_delta
+        and model_same
+        and provider_same
+        and not architecture_same
         else "system_bundle_delta"
     )
     public_frozen = dict(baseline_frozen)

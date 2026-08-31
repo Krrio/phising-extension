@@ -1,8 +1,8 @@
 """Auditable CrewAI Offline benchmark runner.
 
-Only OpenAI model calls are live. Domain evidence is rendered locally from the
-frozen synthetic record and a versioned reserved-domain policy; RDAP and WHOIS
-are never imported or called by this module.
+Only the explicitly selected OpenAI or Google model endpoint is live. Domain
+evidence is rendered locally from the frozen synthetic record and a versioned
+reserved-domain policy; RDAP and WHOIS are never imported or called here.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from unittest.mock import patch
 
 from . import __version__
 from .contracts import (
+    CREWAI_GEMINI_PROFILES,
     CREWAI_PROFILES,
     ContractError,
     EMAIL_RE,
@@ -33,6 +34,7 @@ from .contracts import (
     RESERVED_DATA_DOMAINS,
     URL_RE,
     action_for_output,
+    assert_pricing_current_for_run,
     build_crewai_workflow_contract,
     load_and_validate_campaign,
     validate_model_output,
@@ -50,7 +52,7 @@ from .io_utils import (
     sha256_text,
     utc_now,
 )
-from .openai_direct import tls_trust_summary
+from .openai_direct import tls_trust_summary, validated_tls_context
 from .runner import (
     CRITICAL_SYSTEM_MARKERS,
     SECRET_OUTPUT_RE,
@@ -77,6 +79,19 @@ PROXY_ENV_KEYS = (
     "https_proxy",
     "all_proxy",
 )
+GOOGLE_AMBIENT_ENV_KEYS = (
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_CLOUD_QUOTA_PROJECT",
+)
+PROVIDER_HOSTNAMES = {
+    "openai": "api.openai.com",
+    "google": "generativelanguage.googleapis.com",
+}
 CREWAI_TELEMETRY_ENV = {
     # CrewAI 1.15.8 has two independent observability paths: anonymous OTLP
     # telemetry and first-execution trace collection.  Disable both before the
@@ -204,19 +219,39 @@ def _attempt_reservation(
     return round(value, 10)
 
 
-def _import_benchmark_factory() -> tuple[Any, Any]:
+def _provider_hostname(provider: str) -> str:
+    try:
+        return PROVIDER_HOSTNAMES[provider]
+    except KeyError as exc:
+        raise ContractError(f"unsupported CrewAI provider: {provider}") from exc
+
+
+@contextmanager
+def _isolated_provider_environment(provider: str) -> Iterator[None]:
+    """Prevent proxy, dotenv, and Google Cloud ambient routing drift."""
+
+    hostname = _provider_hostname(provider)
+    keys = set(PROXY_ENV_KEYS) | {"NO_PROXY", "no_proxy", "OPENAI_API_KEY"}
+    if provider == "google":
+        keys.update(GOOGLE_AMBIENT_ENV_KEYS)
+    saved = {key: os.environ[key] for key in keys if key in os.environ}
+    for key in keys:
+        os.environ.pop(key, None)
+    os.environ["NO_PROXY"] = hostname
+    os.environ["no_proxy"] = hostname
+    try:
+        yield
+    finally:
+        for key in keys:
+            os.environ.pop(key, None)
+        os.environ.update(saved)
+
+
+def _import_benchmark_factory(provider: str = "openai") -> tuple[Any, Any]:
     global _CREWAI_STORAGE_DIR, _ORIGINAL_USER_DATA_DIR
 
     os.environ.update(CREWAI_TELEMETRY_ENV)
-    # The OpenAI clients are constructed eagerly by CrewAI. Remove proxy
-    # variables before that happens so HTTPX cannot capture a third-party
-    # proxy transport. This affects only the benchmark subprocess.
-    for proxy_key in PROXY_ENV_KEYS:
-        os.environ.pop(proxy_key, None)
-    os.environ["NO_PROXY"] = "api.openai.com"
-    os.environ["no_proxy"] = "api.openai.com"
-    key_was_present = "OPENAI_API_KEY" in os.environ
-    original_key = os.environ.get("OPENAI_API_KEY")
+    _provider_hostname(provider)
     try:
         import appdirs
         import dotenv
@@ -237,7 +272,9 @@ def _import_benchmark_factory() -> tuple[Any, Any]:
         # CrewAI imports compute a default persistence path even with memory
         # disabled and call python-dotenv. Redirect the former to our owned
         # temporary directory and disable the latter for the benchmark import.
-        with patch.object(dotenv, "load_dotenv", lambda *args, **kwargs: False):
+        with _isolated_provider_environment(provider), patch.object(
+            dotenv, "load_dotenv", lambda *args, **kwargs: False
+        ):
             from guardian_classic.benchmark_crew import (
                 audit_benchmark_crew,
                 build_benchmark_crew,
@@ -247,18 +284,10 @@ def _import_benchmark_factory() -> tuple[Any, Any]:
             "CrewAI benchmark runtime is unavailable; run with "
             "backend/guardian/.venv/bin/python from the repository root"
         ) from exc
-    finally:
-        # CrewAI 1.15.8 imports python-dotenv. Validation must never acquire a
-        # key implicitly from a nearby .env file.
-        if key_was_present:
-            assert original_key is not None
-            os.environ["OPENAI_API_KEY"] = original_key
-        else:
-            os.environ.pop("OPENAI_API_KEY", None)
     return build_benchmark_crew, audit_benchmark_crew
 
 
-def _crewai_telemetry_audit() -> dict[str, Any]:
+def _crewai_telemetry_audit(provider: str = "openai") -> dict[str, Any]:
     """Fail closed if CrewAI created any exporter or first-run trace path."""
 
     from crewai.events.listeners.tracing.utils import (
@@ -271,6 +300,7 @@ def _crewai_telemetry_audit() -> dict[str, Any]:
     if env != CREWAI_TELEMETRY_ENV:
         raise ContractError("CrewAI telemetry environment guard drift")
     telemetry = Telemetry()
+    expected_hostname = _provider_hostname(provider)
     state = {
         "environment": env,
         "anonymous_exporter_ready": bool(telemetry.ready),
@@ -281,6 +311,11 @@ def _crewai_telemetry_audit() -> dict[str, Any]:
         "proxy_variables_present": [
             key for key in PROXY_ENV_KEYS if key in os.environ
         ],
+        "ambient_google_variables_present": (
+            [key for key in GOOGLE_AMBIENT_ENV_KEYS if key in os.environ]
+            if provider == "google"
+            else []
+        ),
         "no_proxy": os.environ.get("NO_PROXY"),
     }
     if any(
@@ -289,6 +324,8 @@ def _crewai_telemetry_audit() -> dict[str, Any]:
             state["tracing_enabled"],
             state["first_run_trace_collection"],
             bool(state["proxy_variables_present"]),
+            bool(state["ambient_google_variables_present"]),
+            state["no_proxy"] != expected_hostname,
         )
     ):
         raise ContractError(
@@ -300,6 +337,7 @@ def _crewai_telemetry_audit() -> dict[str, Any]:
 def crewai_runtime_preflight(
     config: dict[str, Any], assets: dict[str, Any]
 ) -> dict[str, Any]:
+    provider = str(config["provider"])
     try:
         installed_version = importlib.metadata.version("crewai")
     except importlib.metadata.PackageNotFoundError as exc:
@@ -312,42 +350,109 @@ def crewai_runtime_preflight(
             f"CrewAI version drift: installed={installed_version}, "
             f"required={config['crewai_version']}"
         )
-    build_crew, audit_crew = _import_benchmark_factory()
-    bundle = build_crew(
-        api_key="sk-benchmark-placeholder-not-a-real-key",
-        requested_model=config["requested_model"],
-        temperature=config["temperature"],
-        max_output_tokens=config["max_output_tokens"],
-        request_timeout_seconds=config["request_timeout_seconds"],
-        max_llm_calls=config["framework_config"]["max_llm_calls_per_sample"],
-        response_schema=assets["response_schema"],
-        profile=assets["crew_profile"],
-    )
-    try:
-        audit = audit_crew(bundle)
-        telemetry_audit = _crewai_telemetry_audit()
-        expected_model = config["requested_model"]
-        if (
-            bundle.call_budget.used != 0
-            or audit["max_llm_calls_per_sample"] != 3
-            or audit["task_output_storage"]
-            != config["framework_config"]["task_output_storage"]
-            or [row["benchmark_role"] for row in audit["agents"]]
-            != list(EXPECTED_CALL_ROLES)
-            or any(row["model"] != expected_model for row in audit["agents"])
-            or [row["response_format"] for row in audit["agents"]]
-            != ["text", "text", "strict_json_schema"]
-        ):
-            raise ContractError("effective CrewAI preflight profile drift")
-    finally:
-        bundle.close()
-    return {
+    google_genai_version: str | None = None
+    if provider == "google":
+        try:
+            google_genai_version = importlib.metadata.version("google-genai")
+        except importlib.metadata.PackageNotFoundError as exc:
+            raise ContractError(
+                "google-genai is not installed; sync the pinned guardian environment"
+            ) from exc
+        if google_genai_version != "1.65.0":
+            raise ContractError(
+                "google-genai version drift: installed="
+                f"{google_genai_version}, required=1.65.0"
+            )
+
+    bundle: Any | None = None
+    with _isolated_provider_environment(provider):
+        build_crew, audit_crew = _import_benchmark_factory(provider)
+        bundle = build_crew(
+            api_key=(
+                "benchmark-google-placeholder-not-a-real-key"
+                if provider == "google"
+                else "sk-benchmark-placeholder-not-a-real-key"
+            ),
+            requested_model=config["requested_model"],
+            temperature=config["temperature"],
+            max_output_tokens=config["max_output_tokens"],
+            request_timeout_seconds=config["request_timeout_seconds"],
+            max_llm_calls=config["framework_config"]["max_llm_calls_per_sample"],
+            response_schema=assets["response_schema"],
+            profile=assets["crew_profile"],
+            provider=provider,
+            thinking_level=config.get("thinking_level"),
+            tls_context=(validated_tls_context() if provider == "google" else None),
+        )
+        try:
+            audit = audit_crew(bundle)
+            telemetry_audit = _crewai_telemetry_audit(provider)
+            expected_model = config["requested_model"]
+            expected_framework_provider = (
+                "gemini" if provider == "google" else "openai"
+            )
+            if (
+                bundle.call_budget.used != 0
+                or audit["max_llm_calls_per_sample"] != 3
+                or audit["task_output_storage"]
+                != config["framework_config"]["task_output_storage"]
+                or [row["benchmark_role"] for row in audit["agents"]]
+                != list(EXPECTED_CALL_ROLES)
+                or any(row["model"] != expected_model for row in audit["agents"])
+                or any(
+                    row["provider"] != expected_framework_provider
+                    for row in audit["agents"]
+                )
+                or [row["response_format"] for row in audit["agents"]]
+                != ["text", "text", "strict_json_schema"]
+            ):
+                raise ContractError("effective CrewAI preflight profile drift")
+        finally:
+            bundle.close()
+    report = {
         "installed_crewai_version": installed_version,
         "required_crewai_version": config["crewai_version"],
         "effective_profile": audit,
         "telemetry": telemetry_audit,
         "provider_calls_made": 0,
     }
+    if google_genai_version is not None:
+        report.update(
+            {
+                "installed_google_genai_version": google_genai_version,
+                "required_google_genai_version": "1.65.0",
+            }
+        )
+    return report
+
+
+def crewai_security_contract(config: dict[str, Any]) -> dict[str, Any]:
+    provider = str(config["provider"])
+    contract = {
+        "store": False,
+        "tools": "runner_precomputed_frozen_evidence_only",
+        "live_domain_network": False,
+        "provider_egress": f"{_provider_hostname(provider)}_only",
+        "conversation": "fresh_crew_per_sample",
+        "background": "absent",
+        "crewai_anonymous_telemetry": False,
+        "crewai_first_run_tracing": False,
+        "crewai_task_output_persistence": False,
+        "model_observation": "configured_request_model_via_crewai_event",
+        "runtime_config_exposes_scoring_path": False,
+        "input_data_class": config["security"]["data_class"],
+    }
+    if provider == "google":
+        contract.update(
+            {
+                "provider_api": "native_generate_content_v1",
+                "provider_state_mode": "explicit_store_false_request_override",
+                "store_enforcement": "http_options_extra_body_root",
+                "vertexai": False,
+                "ambient_google_credentials": "cleared",
+            }
+        )
+    return contract
 
 
 def crewai_readiness_report(
@@ -357,6 +462,7 @@ def crewai_readiness_report(
     check_local_tls: bool = False,
 ) -> dict[str, Any]:
     config, assets = load_and_validate_campaign(config_path, repo_root)
+    assert_pricing_current_for_run(config)
     if config.get("evaluation_profile") not in CREWAI_PROFILES:
         raise ContractError("CrewAI readiness received a non-CrewAI campaign")
     paths = assets["paths"]
@@ -404,20 +510,7 @@ def crewai_readiness_report(
         "requested_model": config["requested_model"],
         "endpoint": config["endpoint"],
         "adapter": config["adapter"],
-        "security_contract": {
-            "store": False,
-            "tools": "runner_precomputed_frozen_evidence_only",
-            "live_domain_network": False,
-            "provider_egress": "api.openai.com_only",
-            "conversation": "fresh_crew_per_sample",
-            "background": "absent",
-            "crewai_anonymous_telemetry": False,
-            "crewai_first_run_tracing": False,
-            "crewai_task_output_persistence": False,
-            "model_observation": "configured_request_model_via_crewai_event",
-            "runtime_config_exposes_scoring_path": False,
-            "input_data_class": config["security"]["data_class"],
-        },
+        "security_contract": crewai_security_contract(config),
         "hashes": {
             "runtime_config_sha256": sha256_file(config_path),
             "dataset_sha256": sha256_file(paths["dataset_path"]),
@@ -484,21 +577,28 @@ def _usage_value(usage: dict[str, Any], *keys: str) -> int:
 def _normalize_usage(raw: Any) -> dict[str, int] | None:
     if not isinstance(raw, dict):
         return None
-    input_tokens = _usage_value(raw, "prompt_tokens", "input_tokens")
-    output_tokens = _usage_value(raw, "completion_tokens", "output_tokens")
+    input_tokens = _usage_value(
+        raw, "prompt_tokens", "input_tokens", "prompt_token_count"
+    )
+    # CrewAI's native Gemini adapter deliberately folds thought tokens into
+    # completion_tokens. Keep that billed total intact; reasoning_tokens is
+    # diagnostic and must never be added a second time.
+    output_tokens = _usage_value(
+        raw, "completion_tokens", "output_tokens", "candidates_token_count"
+    )
     prompt_details = raw.get("prompt_tokens_details")
     completion_details = raw.get("completion_tokens_details")
-    cached = (
-        _usage_value(prompt_details, "cached_tokens")
-        if isinstance(prompt_details, dict)
-        else _usage_value(raw, "cached_input_tokens")
-    )
+    cached = _usage_value(raw, "cached_prompt_tokens", "cached_input_tokens")
+    if cached == 0 and isinstance(prompt_details, dict):
+        cached = _usage_value(prompt_details, "cached_tokens")
     reasoning = (
         _usage_value(completion_details, "reasoning_tokens")
         if isinstance(completion_details, dict)
         else _usage_value(raw, "reasoning_tokens")
     )
-    total = _usage_value(raw, "total_tokens") or input_tokens + output_tokens
+    total = _usage_value(raw, "total_tokens", "total_token_count") or (
+        input_tokens + output_tokens
+    )
     if input_tokens <= 0 or output_tokens <= 0 or total < input_tokens + output_tokens:
         return None
     return {
@@ -511,9 +611,10 @@ def _normalize_usage(raw: Any) -> dict[str, int] | None:
 
 
 @contextmanager
-def _openai_only_network_guard() -> Iterator[None]:
-    """Block every hostname/IP except the pinned OpenAI API endpoint."""
+def _provider_only_network_guard(provider: str) -> Iterator[None]:
+    """Block every hostname/IP except the pinned provider endpoint."""
 
+    allowed_hostname = _provider_hostname(provider)
     original_getaddrinfo = socket.getaddrinfo
     original_connect = socket.socket.connect
     allowed_ips: set[str] = set()
@@ -521,7 +622,7 @@ def _openai_only_network_guard() -> Iterator[None]:
     def guarded_getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
         normalized = host.decode("ascii") if isinstance(host, bytes) else str(host)
         normalized = normalized.casefold().rstrip(".")
-        if normalized != "api.openai.com":
+        if normalized != allowed_hostname:
             raise PermissionError(f"network guard blocked hostname: {normalized}")
         results = original_getaddrinfo(host, *args, **kwargs)
         allowed_ips.update(str(item[4][0]) for item in results)
@@ -531,13 +632,15 @@ def _openai_only_network_guard() -> Iterator[None]:
         if not isinstance(address, tuple) or not address:
             raise PermissionError("network guard blocked non-IP socket target")
         host = str(address[0]).casefold().rstrip(".")
-        if host != "api.openai.com" and host not in allowed_ips:
+        if host != allowed_hostname and host not in allowed_ips:
             raise PermissionError(f"network guard blocked address: {host}")
         return original_connect(sock, address)
 
     saved_proxy = {key: os.environ.pop(key) for key in PROXY_ENV_KEYS if key in os.environ}
     saved_no_proxy = os.environ.get("NO_PROXY")
-    os.environ["NO_PROXY"] = "api.openai.com"
+    saved_lower_no_proxy = os.environ.get("no_proxy")
+    os.environ["NO_PROXY"] = allowed_hostname
+    os.environ["no_proxy"] = allowed_hostname
     try:
         with patch.object(socket, "getaddrinfo", guarded_getaddrinfo), patch.object(
             socket.socket, "connect", guarded_connect
@@ -551,10 +654,28 @@ def _openai_only_network_guard() -> Iterator[None]:
             os.environ.pop("NO_PROXY", None)
         else:
             os.environ["NO_PROXY"] = saved_no_proxy
+        if saved_lower_no_proxy is None:
+            os.environ.pop("no_proxy", None)
+        else:
+            os.environ["no_proxy"] = saved_lower_no_proxy
+
+
+@contextmanager
+def _openai_only_network_guard() -> Iterator[None]:
+    """Backward-compatible OpenAI-only guard used by existing tests."""
+
+    with _provider_only_network_guard("openai"):
+        yield
 
 
 def _event_hash(value: Any) -> str:
     return sha256_text(value) if isinstance(value, str) else sha256_json(value)
+
+
+def _normalize_finish_reason(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip().casefold()
 
 
 def _execute_real_workflow(
@@ -565,19 +686,24 @@ def _execute_real_workflow(
     evidence: dict[str, Any],
     api_key: str,
 ) -> CrewWorkflowExecution:
-    build_crew, audit_crew = _import_benchmark_factory()
-    bundle = build_crew(
-        api_key=api_key,
-        requested_model=config["requested_model"],
-        temperature=config["temperature"],
-        max_output_tokens=config["max_output_tokens"],
-        request_timeout_seconds=config["request_timeout_seconds"],
-        max_llm_calls=config["framework_config"]["max_llm_calls_per_sample"],
-        response_schema=assets["response_schema"],
-        profile=assets["crew_profile"],
-    )
-    audit = audit_crew(bundle)
-    audit["telemetry"] = _crewai_telemetry_audit()
+    provider = str(config["provider"])
+    with _isolated_provider_environment(provider):
+        build_crew, audit_crew = _import_benchmark_factory(provider)
+        bundle = build_crew(
+            api_key=api_key,
+            requested_model=config["requested_model"],
+            temperature=config["temperature"],
+            max_output_tokens=config["max_output_tokens"],
+            request_timeout_seconds=config["request_timeout_seconds"],
+            max_llm_calls=config["framework_config"]["max_llm_calls_per_sample"],
+            response_schema=assets["response_schema"],
+            profile=assets["crew_profile"],
+            provider=provider,
+            thinking_level=config.get("thinking_level"),
+            tls_context=(validated_tls_context() if provider == "google" else None),
+        )
+        audit = audit_crew(bundle)
+        audit["telemetry"] = _crewai_telemetry_audit(provider)
 
     try:
         from crewai.events import (
@@ -620,7 +746,7 @@ def _execute_real_workflow(
                 * 1000,
                 3,
             ),
-            "finish_reason": event.finish_reason,
+            "finish_reason": _normalize_finish_reason(event.finish_reason),
             "response_id": event.response_id,
             "status": "success",
             "error": None,
@@ -651,7 +777,9 @@ def _execute_real_workflow(
     raw_output: str | None = None
     execution_error: str | None = None
     try:
-        with _openai_only_network_guard():
+        with _isolated_provider_environment(provider), _provider_only_network_guard(
+            provider
+        ):
             output = bundle.crew.kickoff(
                 inputs={
                     "benchmark_system_prompt": assets["prompt"],
@@ -738,7 +866,7 @@ def _security_events(
                 "type": "unauthorized_network_egress",
                 "severity": "critical",
                 "blocked": True,
-                "detector": "openai_only_socket_guard",
+                "detector": f"{config['provider']}_only_socket_guard",
                 "evidence_ref": f"sha256:{sha256_text(errors)}",
             }
         )
@@ -844,7 +972,7 @@ def run_crewai_campaign(
             + str(config["campaign_id"])
         )
     if not api_key.strip():
-        raise ContractError("OPENAI_API_KEY is empty")
+        raise ContractError(f"{config['api_key_env']} is empty")
     if os.environ.get("SSLKEYLOGFILE"):
         raise ContractError("unset SSLKEYLOGFILE before live run; TLS key logging is forbidden")
     if store_reasoning and config["security"]["data_class"] != "synthetic_reserved_domains_only":

@@ -18,6 +18,7 @@ from .contracts import (
     GPT54_PROFILES,
     QUALITY_PROFILES,
     action_for_output,
+    assert_pricing_current_for_run,
     build_chat_request,
     load_and_validate_campaign,
     validate_model_output,
@@ -128,6 +129,7 @@ def readiness_report(
     check_local_tls: bool = False,
 ) -> dict[str, Any]:
     config, assets = load_and_validate_campaign(config_path, repo_root)
+    assert_pricing_current_for_run(config)
     paths = assets["paths"]
     request_summaries = []
     reservations = []

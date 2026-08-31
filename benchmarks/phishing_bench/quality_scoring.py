@@ -10,7 +10,7 @@ from typing import Any
 
 from .contracts import (
     ACTIONS,
-    CREWAI_QUALITY_PILOT_PROFILE,
+    CREWAI_PROFILES,
     QUALITY_PROFILES,
     QUALITY_PILOT_PROFILE,
     VERDICTS,
@@ -159,21 +159,10 @@ def _validate_quality_run_profile(
         and required_reservation <= float(runtime_config["budget"]["max_cost_usd"])
     )
     is_gemini = runtime_config.get("adapter") == "gemini_interactions"
-    if runtime_config.get("evaluation_profile") == CREWAI_QUALITY_PILOT_PROFILE:
-        expected_security_contract = {
-            "store": False,
-            "tools": "runner_precomputed_frozen_evidence_only",
-            "live_domain_network": False,
-            "provider_egress": "api.openai.com_only",
-            "conversation": "fresh_crew_per_sample",
-            "background": "absent",
-            "crewai_anonymous_telemetry": False,
-            "crewai_first_run_tracing": False,
-            "crewai_task_output_persistence": False,
-            "model_observation": "configured_request_model_via_crewai_event",
-            "runtime_config_exposes_scoring_path": False,
-            "input_data_class": runtime_config["security"]["data_class"],
-        }
+    if runtime_config.get("evaluation_profile") in CREWAI_PROFILES:
+        from .crewai_offline import crewai_security_contract
+
+        expected_security_contract = crewai_security_contract(runtime_config)
     elif is_gemini:
         expected_security_contract = {
             "store": False,
@@ -814,8 +803,12 @@ def score_quality_run(
     status_summary = ", ".join(
         f"{status}={count}" for status, count in sorted(status_counts.items())
     ) or "brak"
+    report_config = manifest.get("runtime_config", {})
+    crewai_google = is_crewai and report_config.get("provider") == "google"
     track_name = (
-        "CrewAI Offline"
+        "CrewAI Offline — Google Gemini"
+        if crewai_google
+        else "CrewAI Offline — OpenAI"
         if is_crewai
         else "Google Gemini Direct"
         if is_gemini
@@ -827,6 +820,13 @@ def score_quality_run(
         else f"outbound attempts: {attempts}; retry: {retry_attempts}"
     )
     bundle_note = (
+        " Tor CrewAI+Gemini zachowuje ten sam model ID, runner dataset, semantykę "
+        "schema i decision policy co Gemini Direct, ale używa GenerateContent v1 "
+        "z innym wire schema, osobnych promptów ról/zadań, trzech ról i frozen "
+        "domain evidence. Różnica jest `cross_api_system_bundle_delta`, nie czystym "
+        "wpływem frameworka."
+        if crewai_google
+        else
         " Tor CrewAI ma ten sam snapshot modelu, runner dataset, schema i decision "
         "policy co Direct, ale używa osobnych promptów ról/zadań oraz dodaje trzy "
         "role i frozen domain evidence. Różnica jest `system_bundle_delta`, nie "
