@@ -287,7 +287,9 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         )
         self.assertFalse(readiness["security_contract"]["vertexai"])
 
-    def test_timeout_diagnostic_preflight_applies_120_seconds_without_retry(self) -> None:
+    def test_completed_timeout_diagnostic_preflight_applies_120_seconds_without_retry(
+        self,
+    ) -> None:
         config, assets = load_and_validate_campaign(
             SMOKE_TIMEOUT_CONFIG, REPO_ROOT
         )
@@ -299,11 +301,14 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         self.assertEqual([row["max_execution_time"] for row in agents], [120] * 3)
         self.assertTrue(all(row["provider_max_attempts"] == 1 for row in agents))
         self.assertEqual(report["provider_calls_made"], 0)
-        self.assertEqual(
-            readiness["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        self.assertEqual(readiness["status"], "LIVE_BLOCKED")
+        self.assertIn(
+            "recorded 5/5 successful smoke", readiness["live_block_reason"]
         )
 
-    def test_timeout_pilot_preflight_applies_120_seconds_without_retry(self) -> None:
+    def test_completed_timeout_pilot_preflight_applies_120_seconds_without_retry(
+        self,
+    ) -> None:
         config, assets = load_and_validate_campaign(
             PILOT_TIMEOUT_CONFIG, REPO_ROOT
         )
@@ -315,8 +320,9 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         self.assertEqual([row["max_execution_time"] for row in agents], [120] * 3)
         self.assertTrue(all(row["provider_max_attempts"] == 1 for row in agents))
         self.assertEqual(report["provider_calls_made"], 0)
-        self.assertEqual(
-            readiness["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        self.assertEqual(readiness["status"], "LIVE_BLOCKED")
+        self.assertIn(
+            "recorded 30/30 successful", readiness["live_block_reason"]
         )
         self.assertLessEqual(
             readiness["required_cost_cap_with_margin_usd"],

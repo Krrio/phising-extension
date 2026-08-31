@@ -47,10 +47,22 @@ G37_PILOT_CONFIG = (
 CREW_GEMINI_PILOT_CONFIG = (
     BENCHMARKS_DIR / "campaigns" / CREW_GEMINI_PILOT_ID / "runtime_config.json"
 )
+CREW_GEMINI_PILOT_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI_PILOT_002_ID
+    / "runtime_config.json"
+)
 CREW_GEMINI_SMOKE_001_CONFIG = (
     BENCHMARKS_DIR
     / "campaigns"
     / CREW_GEMINI_SMOKE_001_ID
+    / "runtime_config.json"
+)
+CREW_GEMINI_SMOKE_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI_SMOKE_002_ID
     / "runtime_config.json"
 )
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
@@ -58,7 +70,7 @@ FAKE_KEY = "gemini_FAKE_live_guard_secret_123456"
 
 
 class ClosedCampaignGuardTests(unittest.TestCase):
-    def test_fail_fast_policy_is_frozen_only_for_active_120_second_campaigns(
+    def test_fail_fast_policy_is_frozen_only_for_120_second_campaigns(
         self,
     ) -> None:
         self.assertNotIn(
@@ -107,11 +119,47 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                     confirm_campaign=CREW_GEMINI_PILOT_ID,
                 )
 
+    @unittest.skipUnless(HAS_CREWAI, "requires the pinned CrewAI environment")
+    def test_completed_crewai_campaigns_are_not_reported_ready_and_cannot_run(
+        self,
+    ) -> None:
+        for campaign_id, config_path, expected_reason in (
+            (
+                CREW_GEMINI_SMOKE_002_ID,
+                CREW_GEMINI_SMOKE_002_CONFIG,
+                "recorded 5/5 successful smoke",
+            ),
+            (
+                CREW_GEMINI_PILOT_002_ID,
+                CREW_GEMINI_PILOT_002_CONFIG,
+                "recorded 30/30 successful",
+            ),
+        ):
+            with self.subTest(campaign_id=campaign_id):
+                config, _ = load_and_validate_campaign(config_path, REPO_ROOT)
+                report = crewai_readiness_report(config_path, REPO_ROOT)
+
+                self.assertIsNotNone(campaign_live_block_reason(config))
+                self.assertEqual(report["status"], "LIVE_BLOCKED")
+                self.assertIn(expected_reason, report["live_block_reason"])
+                with tempfile.TemporaryDirectory() as temporary:
+                    with self.assertRaisesRegex(ValueError, "live run is blocked"):
+                        run_crewai_campaign(
+                            config_path=config_path,
+                            repo_root=REPO_ROOT,
+                            output_root=Path(temporary) / "runs",
+                            api_key=FAKE_KEY,
+                            live_authorized=True,
+                            confirm_campaign=campaign_id,
+                        )
+
     def test_cli_blocks_closed_campaign_before_reading_api_key(self) -> None:
         for campaign_id, config_path in (
             (G37_PILOT_ID, G37_PILOT_CONFIG),
             (CREW_GEMINI_SMOKE_001_ID, CREW_GEMINI_SMOKE_001_CONFIG),
+            (CREW_GEMINI_SMOKE_002_ID, CREW_GEMINI_SMOKE_002_CONFIG),
             (CREW_GEMINI_PILOT_ID, CREW_GEMINI_PILOT_CONFIG),
+            (CREW_GEMINI_PILOT_002_ID, CREW_GEMINI_PILOT_002_CONFIG),
         ):
             with self.subTest(campaign_id=campaign_id):
                 stderr = io.StringIO()

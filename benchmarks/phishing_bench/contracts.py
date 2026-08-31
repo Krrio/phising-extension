@@ -119,9 +119,20 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "obsolete 45-second timeout; replaced by PILOT_030_002 after the "
         "successful SMOKE_002"
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002": (
+        "closed after the recorded 30/30 successful quality pilot "
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002"
+        "__20260831T222709Z__c58b03fe; preserve the PILOT_HOLD result and use "
+        "a new campaign ID for any new experiment"
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001": (
         "closed after the recorded 4 x HTTP 504 and 1 x HTTP 503 provider "
         "availability failure; use the separately frozen SMOKE_002"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002": (
+        "closed after the recorded 5/5 successful smoke and 15/15 successful "
+        "LLM calls BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_"
+        "SMOKE_002__20260831T165055Z__5327489f; preserve the READINESS_PASS result"
     ),
 }
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"

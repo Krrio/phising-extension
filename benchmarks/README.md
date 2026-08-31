@@ -14,11 +14,11 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe, wykonane i policzone jest sześć torów: bazowy OpenAI Direct, CrewAI Offline, OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17` oraz Google Direct `gemini-3.5-flash-lite` i `gemini-3.1-flash-lite`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Wykonany offline eksport `FIVE_WAY_PILOT_030_001` obejmuje pierwsze pięć torów; po zakończeniu całej nowej serii powstanie nowy eksport, bez nadpisywania starego.
+Gotowe, wykonane i policzone jest siedem torów: bazowy OpenAI Direct, CrewAI Offline z OpenAI, OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`, Google Direct `gemini-3.5-flash-lite` i `gemini-3.1-flash-lite` oraz CrewAI Offline z natywnym Google `gemini-3.5-flash-lite`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Wykonany offline eksport `SEVEN_WAY_PILOT_030_001` obejmuje wszystkie siedem wariantów i nie nadpisuje wcześniejszych eksportów. Osobne `FIVE_DIRECT_PILOT_030_001` oraz `GEMINI35_DIRECT_VS_CREWAI_GEMINI_PILOT_030_001` rozdzielają porównanie modeli Direct od porównania całych system bundles.
 
 Oba smoke Gemini 3.7 są zachowanymi negatywnymi wynikami technicznymi. `SMOKE_001` zakończył 10/10 prób timeoutem po 45 s, a diagnostyczny `SMOKE_002` zakończył 5/5 prób timeoutem po 120 s mimo wyłączenia retry. W obu runach brak odpowiedzi i usage; łączna konserwatywna rezerwa nierozstrzygniętego kosztu to `0,124812 USD`. Tor Direct Gemini 3.7 przez synchroniczne stateless Interactions API jest zamknięty, a pilot zablokowany.
 
-Pierwszy live smoke CrewAI Offline + natywny Google `gemini-3.5-flash-lite` jest zachowanym `READINESS_FAIL`: cztery pierwsze calle zakończyły się `504 DEADLINE_EXCEEDED` przy lokalnym limicie 45 s, a piąty jawnym `503 UNAVAILABLE`. Osobny `SMOKE_002` z timeoutem 120 s i zero retry zakończył się `READINESS_PASS`: 5/5 wyników, 15/15 poprawnych calli, brak błędów i zdarzeń security, observed cost `0,0112299 USD`, mediana end-to-end `4469,763 ms`. Ręczny audyt potwierdził czysty commit, pełne usage, kolejność `domain_analyst → content_analyst → orchestrator`, `finish_reason=stop` i zgodność wszystkich hashy. Przygotowany nowy `PILOT_030_002` przenosi tę samą politykę 120 s/zero retry/transient fail-fast na niezmieniony zestaw `n=30`; stary pilot 45 s pozostaje zablokowany.
+Pierwszy live smoke CrewAI Offline + natywny Google `gemini-3.5-flash-lite` jest zachowanym `READINESS_FAIL`: cztery pierwsze calle zakończyły się `504 DEADLINE_EXCEEDED` przy lokalnym limicie 45 s, a piąty jawnym `503 UNAVAILABLE`. Osobny `SMOKE_002` z timeoutem 120 s i zero retry zakończył się `READINESS_PASS`: 5/5 wyników, 15/15 poprawnych calli, brak błędów i zdarzeń security, observed cost `0,0112299 USD`, mediana end-to-end `4469,763 ms`. Pilot `PILOT_030_002` zachował tę samą politykę i zakończył 30/30 workflow bez błędów, 90/90 calli, kosztem `0,0656925 USD` i medianą `4188,024 ms`. Oba zakończone campaign IDs oraz stary pilot 45 s są teraz programowo zablokowane przed rerunem.
 
 Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
 
@@ -30,8 +30,9 @@ Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
 | Direct `gpt-5.4-mini-2026-03-17` | 15 / 1 / 14 / 0 | 0,967742 | 0,066667 | 0,03107325 USD | 1290,606 ms | `PILOT_HOLD` |
 | Direct `gemini-3.5-flash-lite` | 15 / 3 / 12 / 0 | 0,909091 | 0,200000 | 0,02756290 USD | 1238,923 ms | `PILOT_HOLD` |
 | Direct `gemini-3.1-flash-lite` | 15 / 3 / 12 / 0 | 0,909091 | 0,200000 | 0,02177500 USD | 3279,744 ms | `PILOT_HOLD` |
+| CrewAI Offline + `gemini-3.5-flash-lite` | 15 / 2 / 13 / 0 | 0,937500 | 0,133333 | 0,06569250 USD | 4188,024 ms | `PILOT_HOLD` |
 
-Wszystkie sześć wariantów miało recall `1,0`, ale mały, challenge-enriched pilot nie pozwala ogłosić zwycięzcy ani gotowości produkcyjnej. Mini miało najmniej false positives, lecz nie przeszło bramki `benign_hide_zero`: przekazany do IT phishing (`case_032`) został ukryty przez wszystkie sześć wariantów zamiast dopuszczony lub ostrzeżony. Gemini 3.1 dodatkowo ukrył benign `case_038`, podczas gdy Gemini 3.5 i większość wcześniejszych wariantów tylko ostrzegły, a Mini dopuściło tę wiadomość. Nano miało 11/15 benign z akcją `warn` albo `hide`, w tym dwa `hide`.
+Wszystkie siedem wariantów miało recall `1,0`, ale mały, challenge-enriched pilot nie pozwala ogłosić zwycięzcy ani gotowości produkcyjnej. Mini miało najmniej false positives, lecz nie przeszło bramki `benign_hide_zero`: przekazany do IT phishing (`case_032`) został ukryty przez wszystkie siedem wariantów zamiast dopuszczony lub ostrzeżony. Gemini 3.1 dodatkowo ukrył benign `case_038`, podczas gdy Gemini 3.5 Direct i CrewAI+Gemini tylko ostrzegły, a Mini dopuściło tę wiadomość. Nano miało 11/15 benign z akcją `warn` albo `hide`, w tym dwa `hide`.
 
 ```text
 5 syntetycznych runner inputs
@@ -96,9 +97,9 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5 calli pierwszej roli, 4 × 504 i 1 × 503, bez retry; nie uruchamiać ponownie |
-| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli, zero retry i błędów, koszt `0,0112299 USD` |
+| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli, zero retry i błędów, koszt `0,0112299 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001/` | pierwotny pilot 45 s; programowo `LIVE_BLOCKED`, nie uruchamiać |
-| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002/` | aktywny pilot 120 s, zero retry, transient fail-fast, maksymalnie 90 calls / 0,50 USD / 2 h |
+| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, 90 calli, koszt `0,0656925 USD`; programowo `LIVE_BLOCKED` |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
 | `phishing_bench/gemini_direct.py` | bezpośredni transport Gemini Interactions z izolacją sieci, jawną oczekiwaną rewizją schematu, limitem odpowiedzi i bezpiecznym parsowaniem usage |
@@ -507,9 +508,9 @@ Diagnostyczny run `BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002__20260831T111704Z_
 
 Rezerwa zakłada skrajnie konserwatywny rozmiar wejścia i pełne 500 output tokens; nie jest prognozą rachunku. Rzeczywisty koszt pochodzi z usage, a rozstrzygający pozostaje dashboard Google. Zamrożona cena Gemini 3.7 (`0,75 USD/M` input, `0,075 USD/M` cached input, `3,75 USD/M` output) obowiązuje tylko do 31 grudnia 2026. Harness automatycznie odrzuci nowy płatny run po tej dacie; historyczny scoring nadal działa. Gemini 3.1 używa `0,25/0,025/1,50 USD/M`.
 
-### 1. Testy, validate i dry-run bieżącej kampanii — 0 USD
+### 1. Testy regresji i kontrola zamkniętej kampanii — 0 USD
 
-Najpierw uruchom poniższe testy i dry-runy. Gdy przejdą, commituj i pushuj kod kampanii; przed pierwszym live runem `git status --short` ma być pusty. Komendy w tym kroku nie wymagają klucza i nie wysyłają requestów:
+Poniższe komendy nie wymagają klucza i nie wysyłają requestów. Pilot CrewAI+Gemini został już wykonany; jego dry-run służy teraz wyłącznie do potwierdzenia blokady przed przypadkowym ponowieniem:
 
 ```bash
 backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -v
@@ -520,7 +521,7 @@ backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaig
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$CREW_GEMINI_PILOT_CONFIG"
 ```
 
-Każdy aktywny dry-run musi zakończyć się `READY_FOR_MANUAL_LIVE_CONFIRMATION` oraz tekstem `DRY-RUN: nie wykonano żadnego requestu`. Zamknięte piloty Gemini 3.7 i CrewAI+Gemini 45 s zwracają `LIVE_BLOCKED`. W CrewAI dodatkowo sprawdź `crewai=1.15.8`, `google-genai=1.65.0`, trzy role, `api_version=v1`, `wire_store_false_verified=true`, `provider_max_attempts=1`, `trust_env=false`, `follow_redirects=false`, `async_transport=httpx`, `use_vertexai=false` i `provider_calls_made=0`.
+Oczekiwany status dla tej kampanii to `LIVE_BLOCKED` oraz tekst `DRY-RUN: nie wykonano żadnego requestu`. Każdy przyszły eksperyment wymaga nowego campaign ID; dopiero jego aktywny dry-run może zwrócić `READY_FOR_MANUAL_LIVE_CONFIRMATION`. W CrewAI nadal audytuj `crewai=1.15.8`, `google-genai=1.65.0`, trzy role, `api_version=v1`, `wire_store_false_verified=true`, `provider_max_attempts=1`, `trust_env=false`, `follow_redirects=false`, `async_transport=httpx`, `use_vertexai=false` i `provider_calls_made=0`.
 
 ### 2. Direct Gemini 3.1 — etap zakończony
 
@@ -586,33 +587,13 @@ Pierwszy run `BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001__20
 
 Google zaleca zwiększenie deadline'u klienta przy `504`, a `503` traktuje jako przejściowy błąd dostępności. Dlatego `SMOKE_001` pozostaje bez zmian i nie wolno go ponawiać. `SMOKE_002` zachował model, dane, prompty, GenerateContent v1, thinking, schema i zero retry, ale użył timeoutu 120 s. Run `BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002__20260831T165055Z__5327489f` zakończył się `READINESS_PASS`: 5/5 sukcesów, 15/15 calli, observed cost `0,0112299 USD`, mediana end-to-end `4469,763 ms`. Manifest wskazuje czysty commit `d864f5f2d9736670d2b9800f6af4703b82859007`; ręczny audyt potwierdził kolejność trzech ról, pełne usage, `finish_reason=stop`, brak dodatkowych calli i zgodność hashy.
 
-Nowy `PILOT_030_002` używa tego samego timeoutu 120 s i zero retry. Po pierwszym 429, 5xx albo lokalnym timeout działa fail-fast: pozostałe rekordy otrzymują `campaign_stopped`, więc awaria dostępności nie zużyje całego limitu. Ma maksymalnie 90 calli, limit 2 h i hard cap `0,50 USD`. Walidator wylicza konserwatywną rezerwę `0,3301596 USD` oraz wymagany cap z marginesem `0,39619152 USD`; liniowe przeskalowanie observed cost smoke daje około `0,0673794 USD`, ale nie jest prognozą ani gwarancją rachunku. Przed live sprawdź billing/usage Google oraz [status Google AI Studio i Gemini API](https://aistudio.google.com/status).
+Pilot `BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002__20260831T222709Z__c58b03fe` zakończył się technicznie poprawnie: 30/30 wyników `success`, 90/90 calli bez retry i błędów providera, 60 lokalnych tool events z `network_used=false`, pełne usage oraz zero zdarzeń security. Run powstał na czystym commicie `b00a10dc3d493598344a2acbf83663752636ddbf`; wszystkie hashe artefaktów są zgodne. Observed cost wyniósł `0,0656925 USD`, blisko wcześniejszego liniowego oszacowania `0,0673794 USD`; rezerwa ledgeru `0,3301596 USD` nie jest rachunkiem. Cały run trwał `128,460 s`, a mediana end-to-end wyniosła `4188,024 ms`.
+
+Wynik jakości to `TP=15, FP=2, TN=13, FN=0`, precision `0,882353`, recall `1,0`, F1 `0,9375` i FPR `0,133333`. `PILOT_HOLD` wynika wyłącznie z `case_032`: benign zgłoszenie cytowanego phishingu do IT dostało `phishing/hide`, chociaż dopuszczalne było `allow|warn`. Drugi binarny FP, `case_038`, dostał `suspicious/warn`; jest błędem w binarnej confusion matrix, ale poprawną akcją golden. Łączna zgodność golden actions wynosi 29/30.
 
 Scoring rozdziela teraz `planned_workflows`, `started_workflows`, `not_attempted` i `provider_failures`. Rekordy `campaign_stopped` nadal konserwatywnie pozostają błędami technicznymi w mianownikach, ale nie są błędnie przedstawiane jako osobne wywołania providera. `ledger_reserved_or_observed_usd` jest górną rezerwą bezpieczeństwa, nie potwierdzonym rachunkiem; rzeczywisty spend nadal sprawdzaj w dashboardzie Google.
 
-```bash
-read -s GEMINI_API_KEY
-export GEMINI_API_KEY
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign "$CREW_GEMINI_PILOT_CONFIG" \
-  --live \
-  --confirm-campaign BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002
-
-unset GEMINI_API_KEY
-
-CREW_GEMINI_PILOT_RUN="$(find "$PWD/benchmark-runs" -maxdepth 1 -type d \
-  -name 'BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002__*' \
-  -print | sort | tail -n 1)"
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
-  --run-dir "$CREW_GEMINI_PILOT_RUN" \
-  --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl
-
-cat "$CREW_GEMINI_PILOT_RUN/scoring/report.md"
-```
-
-Uruchom `PILOT_030_002` dokładnie raz i zachowaj jego wynik niezależnie od jakości. Nie uruchamiaj istniejącego `PILOT_030_001`, ponieważ nadal ma timeout 45 s; CLI i runner blokują live tego campaign ID. Po scoringu sprawdź 30 rekordów, liczbę rozpoczętych i nieuruchomionych workflow, maksymalnie 90 calli, pełne usage, statusy security, koszt observed i rezerwę ledgeru. `PILOT_HOLD` nie jest zgodą na automatyczny rerun.
+Nie uruchamiaj ponownie `SMOKE_002`, `PILOT_030_001` ani `PILOT_030_002`. CLI i runner zwracają dla nich `LIVE_BLOCKED`; nowy model, prompt, timeout albo architektura wymagają osobnego campaign ID. `PILOT_HOLD` nie jest zgodą na automatyczny rerun.
 
 Po każdym pilocie zachowaj run bez zmian. Nie powtarzaj płatnego testu na podstawie słabego wyniku i nie dostrajaj promptu na tych 30 przypadkach. Nowy model, cena, prompt, provider API lub konfiguracja CrewAI wymagają nowego campaign ID.
 
@@ -620,7 +601,13 @@ Po każdym pilocie zachowaj run bez zmian. Nie powtarzaj płatnego testu na pods
 
 `compare` nie wykonuje requestów i nie potrzebuje klucza API. Pierwszy `--run` jest baseline. Każdy wariant musi być wcześniej policzony przez `score` na dokładnie tym samym zaufanym bundle labeli. Komenda ponownie sprawdza zamknięte artefakty runu, zgodność datasetu, labeli, decision policy, response schema, per-sample input hash oraz matematykę scoringu.
 
-Gotowy eksport znajduje się w `benchmark-runs/comparisons/FIVE_WAY_PILOT_030_001/`. Gemini względem bazowego Direct ma identyczne F1 i FPR oraz binarne decyzje 30/30, koszt `×3,563930` i medianę latency `×0,540695`; mimo tych samych trzech błędnych przypadków dokładna akcja zgadza się w 23/30. Względem GPT-5.4 Mini Gemini ma `ΔF1=-0,058651`, `ΔFPR=+0,133333`, koszt `×0,887030` i medianę latency `×0,959954`; Mini było poprawne w dwóch przypadkach, w których Gemini nie było, a odwrotnej sytuacji nie było. To nadal `INCONCLUSIVE`, a nie deklaracja zwycięzcy.
+Aktualne eksporty znajdują się w:
+
+- `benchmark-runs/comparisons/FIVE_DIRECT_PILOT_030_001/` — pięć modeli/providerów Direct;
+- `benchmark-runs/comparisons/GEMINI35_DIRECT_VS_CREWAI_GEMINI_PILOT_030_001/` — izolowane zestawienie dwóch system bundles z tym samym model ID;
+- `benchmark-runs/comparisons/SEVEN_WAY_PILOT_030_001/` — zbiorcza tabela wszystkich siedmiu wariantów.
+
+CrewAI+Gemini względem Gemini 3.5 Direct ma `ΔF1=+0,028409`, `ΔFPR=-0,066667`, koszt `×2,383367` i medianę latency `×3,380375`; binarna decyzja zgadza się w 29/30, a dokładna akcja w 28/30. Względem GPT-5.4 Mini ma `ΔF1=-0,030242`, `ΔFPR=+0,066666`, koszt `×2,114117` i medianę latency `×3,245006`. Są to różnice opisowe na 30 syntetycznych przypadkach, nie dowód przewagi. Całe porównanie pozostaje `INCONCLUSIVE`.
 
 Nie mieszaj dwóch osi eksperymentu. OpenAI, Google, Cohere, Mistral i Anthropic to modele/providerzy. CrewAI jest architekturą orkiestracji, nie kolejnym modelem. Pierwsza macierz cross-provider powinna używać jednego direct calla na mail oraz tego samego promptu, schematu i polityki. CrewAI pozostaje osobnym punktem `architecture=crew`.
 
@@ -694,18 +681,18 @@ Statusy końcowe:
 
 ## Zaktualizowana kolejność dalszych prac
 
-1. Zachować bez rerunów sześć ukończonych pilotów Direct/CrewAI oraz eksport `FIVE_WAY_PILOT_030_001`; wyniki pozostają opisowe i `INCONCLUSIVE`.
+1. Zachować bez rerunów siedem ukończonych pilotów Direct/CrewAI oraz eksporty `FIVE_DIRECT_PILOT_030_001`, `GEMINI35_DIRECT_VS_CREWAI_GEMINI_PILOT_030_001` i `SEVEN_WAY_PILOT_030_001`; wyniki pozostają opisowe i `INCONCLUSIVE`.
 2. Zachować negatywne Gemini 3.5 `SMOKE_001` i `SMOKE_002`, pozytywny `SMOKE_003` oraz zakończony `PILOT_030_002`; żadnego z tych campaign IDs nie uruchamiać ponownie.
 3. Zachować zakończony Gemini 3.1 smoke i pilot: 30/30 sukcesów technicznych, `TP=15, FP=3, TN=12, FN=0`, koszt `0,021775 USD`, mediana `3279,744 ms` i `PILOT_HOLD` przez dwa benign `hide`.
 4. Zachować oba negatywne smoke Gemini 3.7: `SMOKE_001` ma 10 timeoutów po 45 s i rezerwę nieznanego kosztu `0,083208 USD`; `SMOKE_002` ma 5 timeoutów po 120 s, zero retry i rezerwę `0,041604 USD`. Sprawdzić łącznie maksymalnie `0,124812 USD` w dashboardzie Google, nie uruchamiać tych campaign IDs ponownie i nie uruchamiać pilota 3.7.
-5. Zachować negatywny CrewAI+Gemini `SMOKE_001` oraz pozytywny `SMOKE_002`: 5/5 sukcesów, 15/15 poprawnych calli, koszt `0,0112299 USD` i mediana `4469,763 ms`. Po commit/push nowego kontraktu wykonać dokładnie raz `PILOT_030_002` z timeoutem 120 s, zero retry i transient fail-fast; nie używać zablokowanego pilota 45 s.
+5. Zachować negatywny CrewAI+Gemini `SMOKE_001`, pozytywny `SMOKE_002` oraz zakończony `PILOT_030_002`: 30/30 sukcesów, 90/90 calli, `TP=15, FP=2, TN=13, FN=0`, koszt `0,0656925 USD`, mediana `4188,024 ms` i `PILOT_HOLD` przez jeden benign `hide`. Wszystkie trzy zakończone campaign IDs są zamknięte przed rerunem.
 6. Ewentualny powrót do Gemini 3.7 przez background execution lub GenerateContent traktować jako nowy eksperyment z osobnym campaign ID dopiero po zakończeniu bieżącej serii i ponownej decyzji budżetowej.
-7. Zachować eksport pięciowariantowy. Para Direct OpenAI–Direct Gemini ma typ `model_or_provider_delta`; każde porównanie CrewAI+OpenAI pozostaje `system_bundle_delta`, a CrewAI+Gemini jest `cross_api_system_bundle_delta`.
+7. Zachować stare eksporty bez nadpisywania oraz nowe eksporty Direct, Gemini architecture i siedmiowariantowy. Para Direct OpenAI–Direct Gemini ma typ `model_or_provider_delta`; każde porównanie CrewAI+OpenAI pozostaje `system_bundle_delta`, a CrewAI+Gemini jest `cross_api_system_bundle_delta`.
 8. Dopiero potem zdecydować, czy budżet uzasadnia najwyżej 1–2 kolejne tanie adaptery. Dokładne modele, snapshoty i ceny ponownie zweryfikować przed zamrożeniem każdego campaign ID.
 9. Po screeningu wybrać najwyżej dwa warianty według prerejestrowanej polityki obejmującej przede wszystkim FN/recall i FPR, a dopiero potem koszt/latency. Zbudować nowy, niewidziany `binary_quality_v2` i wykonać blind confirmation `n=100` na finalistę. Nie zwiększać automatycznie do 200; druga setka jest dozwolona tylko jako wcześniej zaplanowane powtórzenie lub gdy przedział niepewności jest nadal decyzyjnie zbyt szeroki.
 10. `n=30` służy do screeningu i debugowania, `n=100` do ostrożnego confirmation. Żaden wynik syntetyczny sam w sobie nie dowodzi gotowości produkcyjnej; później potrzebny jest osobny, zanonimizowany i zgodnie dopuszczony zestaw z rzeczywistego rozkładu ruchu.
 
-Przy limicie 30 godzin rozsądny zakres to: zachować istniejące pięć pilotów, ewentualnie dołożyć jeszcze najwyżej 1–2 tanie adaptery Direct, a następnie wykonać `2 × 100` blind confirmation tylko dla finalistów. To daje informację o wielu silnikach bez marnowania budżetu na 100–200 maili dla każdego słabego wariantu.
+Przy limicie 30 godzin rozsądny zakres to: zachować istniejące siedem pilotów, ewentualnie dołożyć jeszcze najwyżej 1–2 wcześniej zamrożone tanie adaptery, a następnie wykonać `2 × 100` blind confirmation tylko dla finalistów. To daje informację o wielu silnikach bez marnowania budżetu na 100–200 maili dla każdego słabego wariantu.
 
 W blind confirmation hash scoring bundle musi zostać prerejestrowany w zaufanym miejscu przed pierwszym call, niezależnie od repo i operatora runnera. Sąsiedni `scoring_manifest.json` wystarcza do jawnych syntetycznych pilotów, ale nie jest granicą bezpieczeństwa dla ukrytych labeli.
 
