@@ -18,8 +18,10 @@ from .contracts import (
     GPT54_PROFILES,
     QUALITY_PROFILES,
     action_for_output,
+    assert_campaign_live_allowed,
     assert_pricing_current_for_run,
     build_chat_request,
+    campaign_live_block_reason,
     load_and_validate_campaign,
     validate_model_output,
 )
@@ -252,6 +254,10 @@ def readiness_report(
         "required_cost_cap_with_margin_usd": required_cost_cap,
         "requests": request_summaries,
     }
+    live_block_reason = campaign_live_block_reason(config)
+    if live_block_reason is not None:
+        report["status"] = "LIVE_BLOCKED"
+        report["live_block_reason"] = live_block_reason
     if "dataset_manifest_path" in paths:
         report["hashes"]["dataset_manifest_sha256"] = sha256_file(
             paths["dataset_manifest_path"]
@@ -449,6 +455,8 @@ def run_campaign(
 ) -> Path:
     config, assets = load_and_validate_campaign(config_path, repo_root)
     uses_default_transport = transport is None
+    if uses_default_transport:
+        assert_campaign_live_allowed(config)
     if uses_default_transport and (
         live_authorized is not True or confirm_campaign != config["campaign_id"]
     ):

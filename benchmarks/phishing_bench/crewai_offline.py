@@ -26,6 +26,7 @@ from unittest.mock import patch
 
 from . import __version__
 from .contracts import (
+    CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS,
     CREWAI_GEMINI_PROFILES,
     CREWAI_PROFILES,
     ContractError,
@@ -34,8 +35,10 @@ from .contracts import (
     RESERVED_DATA_DOMAINS,
     URL_RE,
     action_for_output,
+    assert_campaign_live_allowed,
     assert_pricing_current_for_run,
     build_crewai_workflow_contract,
+    campaign_live_block_reason,
     load_and_validate_campaign,
     validate_model_output,
 )
@@ -69,6 +72,11 @@ from .runner import (
 
 EXPECTED_CALL_ROLES = ("domain_analyst", "content_analyst", "orchestrator")
 EXPECTED_CALL_TASKS = ("domain_analysis", "content_analysis", "synthesis")
+GOOGLE_PROVIDER_FAILURE_KINDS = {
+    "rate_limit",
+    "timeout",
+    "provider_http_error",
+}
 _CREWAI_STORAGE_DIR: Path | None = None
 _ORIGINAL_USER_DATA_DIR: Any | None = None
 PROXY_ENV_KEYS = (
@@ -118,6 +126,9 @@ class CrewCallObservation:
     response_id: str | None
     status: str
     error: str | None
+    error_kind: str | None = None
+    status_code: int | None = None
+    provider_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -552,6 +563,10 @@ def crewai_readiness_report(
         "required_cost_cap_with_margin_usd": required_cost_cap,
         "requests": requests,
     }
+    live_block_reason = campaign_live_block_reason(config)
+    if live_block_reason is not None:
+        report["status"] = "LIVE_BLOCKED"
+        report["live_block_reason"] = live_block_reason
     if "dataset_manifest_path" in paths:
         report["hashes"]["dataset_manifest_sha256"] = sha256_file(
             paths["dataset_manifest_path"]
@@ -803,6 +818,12 @@ def _execute_real_workflow(
                 execution_error = f"CrewAI client cleanup failed: {exc}"
 
     budget_roles = bundle.call_budget.roles
+    provider_failures = bundle.provider_failures if provider == "google" else {}
+    if execution_error is not None and provider_failures:
+        # CrewAI re-raises the provider exception after converting its event to
+        # text. Keep only the already-scrubbed source message in our workflow
+        # result; structured fields are attached to the matching call below.
+        execution_error = next(iter(provider_failures.values()))["message"]
     observations: list[CrewCallObservation] = []
     for index, call_id in enumerate(order):
         start = started[call_id]
@@ -822,6 +843,7 @@ def _execute_real_workflow(
             },
         )
         role = budget_roles[index] if index < len(budget_roles) else "unknown"
+        provider_failure = provider_failures.get(role)
         observations.append(
             CrewCallObservation(
                 call_id=call_id,
@@ -835,7 +857,26 @@ def _execute_real_workflow(
                 finish_reason=finish["finish_reason"],
                 response_id=finish["response_id"],
                 status=finish["status"],
-                error=finish["error"],
+                error=(
+                    provider_failure["message"]
+                    if provider_failure is not None
+                    else finish["error"]
+                ),
+                error_kind=(
+                    provider_failure["kind"]
+                    if provider_failure is not None
+                    else None
+                ),
+                status_code=(
+                    provider_failure["status_code"]
+                    if provider_failure is not None
+                    else None
+                ),
+                provider_status=(
+                    provider_failure["provider_status"]
+                    if provider_failure is not None
+                    else None
+                ),
             )
         )
     return CrewWorkflowExecution(
@@ -964,6 +1005,8 @@ def run_crewai_campaign(
     if config.get("evaluation_profile") not in CREWAI_PROFILES:
         raise ContractError("CrewAI runner received a non-CrewAI campaign")
     uses_real_executor = workflow_executor is None
+    if uses_real_executor:
+        assert_campaign_live_allowed(config)
     if uses_real_executor and (
         live_authorized is not True or confirm_campaign != config["campaign_id"]
     ):
@@ -1056,17 +1099,20 @@ def run_crewai_campaign(
 
     for record in assets["dataset"]:
         if campaign_stop:
+            stopped_result = _stopped_result(
+                run_id=run_id,
+                config=config,
+                assets=assets,
+                record=record,
+                status="campaign_stopped",
+                error_type=campaign_stop["type"],
+                message=campaign_stop["message"],
+            )
+            stopped_result["llm_call_count"] = 0
+            stopped_result["tool_event_ids"] = []
             append_jsonl(
                 results_path,
-                _stopped_result(
-                    run_id=run_id,
-                    config=config,
-                    assets=assets,
-                    record=record,
-                    status="campaign_stopped",
-                    error_type=campaign_stop["type"],
-                    message=campaign_stop["message"],
-                ),
+                stopped_result,
             )
             continue
 
@@ -1161,14 +1207,66 @@ def run_crewai_campaign(
                 "status_code": None,
             }
         elif execution.error or any(call.status != "success" for call in execution.calls):
-            terminal_status = "runner_error"
-            terminal_error = {
-                "type": "runner_error",
-                "message": sanitize_text(
-                    execution.error or "CrewAI LLM call failed", (api_key,)
-                ),
-                "status_code": None,
-            }
+            failed_call = next(
+                (call for call in reversed(execution.calls) if call.status != "success"),
+                None,
+            )
+            google_failure = (
+                failed_call
+                if config["provider"] == "google"
+                and failed_call is not None
+                and failed_call.error_kind in GOOGLE_PROVIDER_FAILURE_KINDS
+                else None
+            )
+            if google_failure is not None:
+                terminal_status = str(google_failure.error_kind)
+                terminal_error = {
+                    "type": terminal_status,
+                    "message": sanitize_text(
+                        google_failure.error or "CrewAI Google LLM call failed",
+                        (api_key,),
+                    ),
+                    "status_code": google_failure.status_code,
+                    "provider_status": google_failure.provider_status,
+                }
+                status_code = google_failure.status_code
+                if (
+                    config["campaign_id"]
+                    in CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS
+                    and (
+                        status_code == 429
+                        or (status_code is not None and 500 <= status_code <= 599)
+                        or (
+                            google_failure.error_kind == "timeout"
+                            and status_code is None
+                        )
+                    )
+                ):
+                    status_label = (
+                        f"HTTP {status_code}"
+                        if status_code is not None
+                        else "local timeout"
+                    )
+                    ledger["stop_reason"] = (
+                        "transient CrewAI Google provider failure "
+                        f"({status_label}); campaign stopped before further samples"
+                    )
+                    campaign_stop = {
+                        "type": "transient_provider_error",
+                        "message": (
+                            "campaign stopped after a transient CrewAI Google "
+                            f"provider failure ({status_label})"
+                        ),
+                    }
+            else:
+                terminal_status = "runner_error"
+                terminal_error = {
+                    "type": "runner_error",
+                    "message": sanitize_text(
+                        execution.error or "CrewAI LLM call failed", (api_key,)
+                    ),
+                    "status_code": None,
+                }
         elif any(call.usage is None for call in execution.calls):
             terminal_status = "missing_usage"
             terminal_error = {
@@ -1326,6 +1424,15 @@ def run_crewai_campaign(
                     "observed_cost_usd": observed_cost,
                     "latency_ms": call.latency_ms,
                     "status": call_status,
+                    **(
+                        {
+                            "error_kind": call.error_kind,
+                            "status_code": call.status_code,
+                            "provider_status": call.provider_status,
+                        }
+                        if config["provider"] == "google"
+                        else {}
+                    ),
                 },
             )
 

@@ -31,6 +31,7 @@ from .io_utils import (
 )
 from .scoring import (
     CRITICAL_SECURITY_EVENT_TYPES,
+    _execution_observability,
     _fixed_float,
     _load_results,
     _validate_run_integrity,
@@ -184,12 +185,21 @@ def _validate_quality_run_profile(
             "runtime_config_exposes_scoring_path": False,
             "input_data_class": runtime_config["security"]["data_class"],
         }
+    readiness_status = readiness.get("status")
+    readiness_status_valid = bool(
+        readiness_status == "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        or (
+            readiness_status == "LIVE_BLOCKED"
+            and isinstance(readiness.get("live_block_reason"), str)
+            and bool(readiness["live_block_reason"].strip())
+        )
+    )
     if (
         runtime_config.get("evaluation_profile") not in QUALITY_PROFILES
         or runtime_config.get("expected_sample_count") != QUALITY_SAMPLE_COUNT
         or manifest.get("campaign_id") != runtime_config.get("campaign_id")
         or manifest.get("stage") != runtime_config.get("stage")
-        or readiness.get("status") != "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        or not readiness_status_valid
         or readiness.get("campaign_id") != runtime_config.get("campaign_id")
         or readiness.get("evaluation_profile") != runtime_config.get("evaluation_profile")
         or readiness.get("record_count") != QUALITY_SAMPLE_COUNT
@@ -509,6 +519,15 @@ def score_quality_run(
     cost_unknown_attempts = sum(
         int(result.get("cost_unknown_attempts", 0)) for result in results
     )
+    execution_observability = _execution_observability(
+        results,
+        expected_workflows=expected_count,
+        attempt_events=read_jsonl(run_dir / "attempts.jsonl"),
+    )
+    ledger = read_json(run_dir / "budget_ledger.json")
+    ledger_reserved_or_observed_cost = round(
+        float(ledger["reserved_or_observed_cost_usd"]), 10
+    )
     token_totals = {
         key: sum(int(result.get("usage", {}).get(key, 0)) for result in results)
         for key in (
@@ -738,11 +757,13 @@ def score_quality_run(
             "retries": retry_attempts,
             "cost_unknown_attempts": cost_unknown_attempts,
             "semantics": "llm_calls" if is_crewai else "direct_provider_attempts",
-            "workflows": len(results) if is_crewai else attempts - retry_attempts,
+            "workflows": execution_observability["started_workflows"],
+            **execution_observability,
         },
         "usage": token_totals,
         "cost": {
             "observed_usd": observed_cost,
+            "ledger_reserved_or_observed_usd": ledger_reserved_or_observed_cost,
             "observed_usd_per_message": (
                 round(observed_cost / expected_count, 10)
                 if expected_count and cost_unknown_attempts == 0
@@ -787,10 +808,18 @@ def score_quality_run(
         ("golden_action_matches", golden_action_matches),
         ("outbound_attempts", attempts),
         ("retry_attempts", retry_attempts),
+        ("planned_workflows", execution_observability["planned_workflows"]),
+        ("started_workflows", execution_observability["started_workflows"]),
+        ("not_attempted", execution_observability["not_attempted"]),
+        ("provider_failures", execution_observability["provider_failures"]),
         ("cost_unknown_attempts", cost_unknown_attempts),
         ("input_tokens", token_totals["input_tokens"]),
         ("output_tokens", token_totals["output_tokens"]),
         ("observed_cost_usd", _fixed_float(observed_cost)),
+        (
+            "ledger_reserved_or_observed_cost_usd",
+            _fixed_float(ledger_reserved_or_observed_cost),
+        ),
         ("median_success_latency_ms", metrics["latency_ms"]["median"]),
         ("iqr_success_latency_ms", metrics["latency_ms"]["iqr"]),
     ]
@@ -815,7 +844,10 @@ def score_quality_run(
         else "OpenAI Direct"
     )
     attempt_summary = (
-        f"LLM calls: {attempts}; workflows: {len(results)}; workflow retry: 0"
+        f"LLM calls: {attempts}; rozpoczęte workflows: "
+        f"{execution_observability['started_workflows']}; nieuruchomione: "
+        f"{execution_observability['not_attempted']}; błędy providera: "
+        f"{execution_observability['provider_failures']}; workflow retry: 0"
         if is_crewai
         else f"outbound attempts: {attempts}; retry: {retry_attempts}"
     )
@@ -855,6 +887,7 @@ Run: `{manifest.get('run_id')}`
 - krytyczne security events: {critical_security_events};
 - diagnostyczne braki provider metadata: {provider_metadata_omissions};
 - koszt zaobserwowany: ${_fixed_float(observed_cost)};
+- koszt znany lub konserwatywnie zarezerwowany w ledgerze: ${_fixed_float(ledger_reserved_or_observed_cost)};
 - latency `success` min/mediana/IQR/max: {metrics['latency_ms']['min']}/{metrics['latency_ms']['median']}/{metrics['latency_ms']['iqr']}/{metrics['latency_ms']['max']} ms.
 
 ## Interpretacja

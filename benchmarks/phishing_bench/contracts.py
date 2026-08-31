@@ -68,6 +68,43 @@ CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE = (
 CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE = (
     "crewai_gemini35_flash_lite_offline_quality_pilot_v1"
 )
+CREWAI_GEMINI35_FLASH_LITE_SMOKE_VARIANTS = {
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001": (
+        "crewai-offline__google-native__gemini-3.5-flash-lite__crew-v1__thinking-minimal__smoke005-v1",
+        45,
+        0,
+        15,
+        0.10,
+        900,
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002": (
+        "crewai-offline__google-native__gemini-3.5-flash-lite__crew-v1__thinking-minimal__smoke005__timeout120__transient-fail-fast__no-retry-v2",
+        120,
+        0,
+        15,
+        0.10,
+        1800,
+    ),
+}
+CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS = frozenset(
+    {
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002",
+    }
+)
+LIVE_BLOCKED_CAMPAIGNS = {
+    "BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001": (
+        "closed after both prerequisite Gemini 3.7 smoke campaigns failed "
+        "technically"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001": (
+        "obsolete 45-second timeout; a new pilot campaign ID may be created "
+        "only after SMOKE_002 passes"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001": (
+        "closed after the recorded 4 x HTTP 504 and 1 x HTTP 503 provider "
+        "availability failure; use the separately frozen SMOKE_002"
+    ),
+}
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"
 # Kept as a public alias for compatibility with the already frozen nano tests/runs.
 GPT54_NANO_REQUEST_PROFILE = GPT54_REASONING_NONE_REQUEST_PROFILE
@@ -165,6 +202,21 @@ IPV4_RE = re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)")
 
 class ContractError(ValueError):
     pass
+
+
+def campaign_live_block_reason(config: dict[str, Any]) -> str | None:
+    campaign_id = config.get("campaign_id")
+    if not isinstance(campaign_id, str):
+        return None
+    return LIVE_BLOCKED_CAMPAIGNS.get(campaign_id)
+
+
+def assert_campaign_live_allowed(config: dict[str, Any]) -> None:
+    reason = campaign_live_block_reason(config)
+    if reason is not None:
+        raise ContractError(
+            f"live run is blocked for campaign {config['campaign_id']}: {reason}"
+        )
 
 
 def assert_pricing_current_for_run(
@@ -558,7 +610,14 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             raise ContractError("quality pilot requires exactly one configured retry")
         if config["request_timeout_seconds"] != 45:
             raise ContractError("quality pilot requires request_timeout_seconds=45")
-    if is_crewai and config["request_timeout_seconds"] != 45:
+    is_crewai_gemini_smoke = (
+        evaluation_profile == CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE
+    )
+    if (
+        is_crewai
+        and not is_crewai_gemini_smoke
+        and config["request_timeout_seconds"] != 45
+    ):
         raise ContractError("CrewAI Offline requires request_timeout_seconds=45")
     if is_crewai and config["max_output_tokens"] != 500:
         raise ContractError("CrewAI Offline requires max_output_tokens=500")
@@ -578,6 +637,24 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         )
         if actual_variant != expected_variant:
             raise ContractError("Gemini 3.7 smoke timeout/retry budget variant drift")
+    if is_crewai_gemini_smoke:
+        expected_variant = CREWAI_GEMINI35_FLASH_LITE_SMOKE_VARIANTS.get(
+            config["campaign_id"]
+        )
+        if expected_variant is None:
+            raise ContractError("unsupported CrewAI Gemini smoke campaign ID")
+        actual_variant = (
+            config["config_id"],
+            config["request_timeout_seconds"],
+            config["max_retries_per_sample"],
+            budget["max_attempts"],
+            float(budget["max_cost_usd"]),
+            budget["max_wall_seconds"],
+        )
+        if actual_variant != expected_variant:
+            raise ContractError(
+                "CrewAI Gemini smoke timeout/fail-fast budget variant drift"
+            )
     if evaluation_profile in DIRECT_SMOKE_PROFILES:
         if (
             isinstance(budget["max_attempts"], bool)

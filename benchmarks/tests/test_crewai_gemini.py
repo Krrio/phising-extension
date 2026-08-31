@@ -51,6 +51,11 @@ SMOKE_CONFIG = (
     / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001"
     / "runtime_config.json"
 )
+SMOKE_TIMEOUT_CONFIG = (
+    CAMPAIGN_ROOT
+    / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002"
+    / "runtime_config.json"
+)
 PILOT_CONFIG = (
     CAMPAIGN_ROOT
     / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001"
@@ -72,6 +77,9 @@ PILOT_MANIFEST = (
 )
 PILOT_LABELS = (
     BENCHMARKS_DIR / "secure_scoring" / "openai_pilot_030_v1" / "labels.jsonl"
+)
+SMOKE_LABELS = (
+    BENCHMARKS_DIR / "secure_scoring" / "openai_smoke_v1" / "labels.jsonl"
 )
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
 FAKE_KEY = "gemini-crewai_FAKE_SECRET_123456"
@@ -129,6 +137,33 @@ class CrewAIGeminiContractTests(unittest.TestCase):
             pilot["campaign_id"],
             read_json(PILOT_MANIFEST)["compatible_campaign_ids"],
         )
+
+    def test_timeout_diagnostic_is_a_new_frozen_fail_fast_campaign(self) -> None:
+        original, _ = load_and_validate_campaign(SMOKE_CONFIG, REPO_ROOT)
+        diagnostic, _ = load_and_validate_campaign(
+            SMOKE_TIMEOUT_CONFIG, REPO_ROOT
+        )
+
+        self.assertEqual(original["request_timeout_seconds"], 45)
+        self.assertEqual(diagnostic["request_timeout_seconds"], 120)
+        self.assertEqual(diagnostic["max_retries_per_sample"], 0)
+        self.assertEqual(diagnostic["budget"]["max_attempts"], 15)
+        self.assertEqual(diagnostic["budget"]["max_cost_usd"], 0.10)
+        self.assertEqual(diagnostic["budget"]["max_wall_seconds"], 1800)
+        self.assertNotEqual(original["campaign_id"], diagnostic["campaign_id"])
+        self.assertNotEqual(original["config_id"], diagnostic["config_id"])
+        self.assertIn("transient-fail-fast", diagnostic["config_id"])
+        self.assertIn(
+            diagnostic["campaign_id"],
+            read_json(SMOKE_MANIFEST)["compatible_campaign_ids"],
+        )
+
+        changed = deepcopy(diagnostic)
+        changed["request_timeout_seconds"] = 45
+        with self.assertRaisesRegex(
+            ContractError, "timeout/fail-fast budget variant drift"
+        ):
+            validate_runtime_config(changed, REPO_ROOT)
 
     def test_native_usage_and_finish_reason_are_normalized_without_double_count(self) -> None:
         self.assertEqual(_normalize_finish_reason("STOP"), "stop")
@@ -206,7 +241,8 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         self.assertRegex(agents[2]["response_schema_sha256"], r"^[0-9a-f]{64}$")
 
         readiness = crewai_readiness_report(SMOKE_CONFIG, REPO_ROOT)
-        self.assertEqual(readiness["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION")
+        self.assertEqual(readiness["status"], "LIVE_BLOCKED")
+        self.assertIn("SMOKE_002", readiness["live_block_reason"])
         self.assertLessEqual(
             readiness["required_cost_cap_with_margin_usd"],
             config["budget"]["max_cost_usd"],
@@ -216,6 +252,22 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
             "http_options_extra_body_root",
         )
         self.assertFalse(readiness["security_contract"]["vertexai"])
+
+    def test_timeout_diagnostic_preflight_applies_120_seconds_without_retry(self) -> None:
+        config, assets = load_and_validate_campaign(
+            SMOKE_TIMEOUT_CONFIG, REPO_ROOT
+        )
+        report = crewai_runtime_preflight(config, assets)
+        readiness = crewai_readiness_report(SMOKE_TIMEOUT_CONFIG, REPO_ROOT)
+
+        agents = report["effective_profile"]["agents"]
+        self.assertEqual([row["timeout"] for row in agents], [120] * 3)
+        self.assertEqual([row["max_execution_time"] for row in agents], [120] * 3)
+        self.assertTrue(all(row["provider_max_attempts"] == 1 for row in agents))
+        self.assertEqual(report["provider_calls_made"], 0)
+        self.assertEqual(
+            readiness["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        )
 
     def test_real_crewai_kickoff_makes_exactly_three_mocked_provider_calls_and_cleans_up(self) -> None:
         config, assets = load_and_validate_campaign(SMOKE_CONFIG, REPO_ROOT)
@@ -292,6 +344,86 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         self.assertTrue(all(delegate._client is None for delegate in delegates))  # noqa: SLF001
         self.assertTrue(all(delegate.api_key is None for delegate in delegates))
         self.assertTrue(all(client is not None for client in clients))
+
+    def test_timeout_diagnostic_fake_success_writes_15_calls_and_scores(self) -> None:
+        config, _ = load_and_validate_campaign(SMOKE_TIMEOUT_CONFIG, REPO_ROOT)
+        labels = {row["sample_id"]: row for row in read_jsonl(SMOKE_LABELS)}
+
+        def executor(**kwargs: Any) -> CrewWorkflowExecution:
+            record = kwargs["record"]
+            malicious = labels[record["sample_id"]]["class_label"] == "malicious"
+            output = {
+                "trustScore": 10 if malicious else 95,
+                "verdict": "phishing" if malicious else "safe",
+                "confidence": 0.95,
+                "reasoning": "Syntetyczne uzasadnienie diagnostycznego smoke.",
+                "categories": ["impersonation"] if malicious else [],
+                "policyAssessment": None,
+            }
+            calls = tuple(
+                CrewCallObservation(
+                    call_id=f"{record['sample_id']}-{index}",
+                    role=role,
+                    task_name=task,
+                    request_sha256=sha256_text(
+                        f"diagnostic-request-{record['sample_id']}-{index}"
+                    ),
+                    response_sha256=sha256_text(
+                        f"diagnostic-response-{record['sample_id']}-{index}"
+                    ),
+                    model=config["requested_model"],
+                    usage={
+                        "input_tokens": 100,
+                        "cached_input_tokens": 20,
+                        "output_tokens": 20,
+                        "reasoning_tokens": 5,
+                        "total_tokens": 120,
+                    },
+                    latency_ms=5.0,
+                    finish_reason="stop",
+                    response_id=f"fake-{record['sample_id']}-{index}",
+                    status="success",
+                    error=None,
+                )
+                for index, (role, task) in enumerate(
+                    zip(
+                        ("domain_analyst", "content_analyst", "orchestrator"),
+                        ("domain_analysis", "content_analysis", "synthesis"),
+                        strict=True,
+                    ),
+                    start=1,
+                )
+            )
+            return CrewWorkflowExecution(
+                raw_output=json.dumps(output, ensure_ascii=False),
+                calls=calls,
+                runtime_audit={},
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_crewai_campaign(
+                config_path=SMOKE_TIMEOUT_CONFIG,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                workflow_executor=executor,
+            )
+            scoring_dir = score_run(
+                run_dir=run_dir,
+                labels_path=SMOKE_LABELS,
+                output_dir=None,
+                repo_root=REPO_ROOT,
+            )
+            metrics = read_json(scoring_dir / "metrics.json")
+            calls = read_jsonl(run_dir / "calls.jsonl")
+            manifest = read_json(run_dir / "run_manifest.json")
+
+        self.assertEqual(metrics["campaign_status"], "READINESS_PASS")
+        self.assertEqual(len(calls), 15)
+        self.assertEqual(manifest["summary"]["attempts_started"], 15)
+        self.assertEqual(
+            manifest["runtime_config"]["request_timeout_seconds"], 120
+        )
 
     def test_fake_pilot_writes_90_calls_and_scores_as_cross_api_bundle(self) -> None:
         config, assets = load_and_validate_campaign(PILOT_CONFIG, REPO_ROOT)

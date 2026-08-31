@@ -27,6 +27,89 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 EXPECTED_AGENT_KEYS = ("domain_analyst", "content_analyst", "orchestrator")
 EXPECTED_TASK_KEYS = ("domain_analysis", "content_analysis", "synthesis")
 _ORIGINAL_SQLITE_CONNECT = sqlite3.connect
+_STRUCTURED_PROVIDER_FAILURE_KINDS = frozenset(
+    {"rate_limit", "timeout", "provider_http_error"}
+)
+
+
+@dataclass(frozen=True)
+class BenchmarkProviderFailure:
+    """Secret-free provider failure captured before CrewAI stringifies it."""
+
+    kind: str
+    status_code: int | None
+    provider_status: str | None
+    message: str
+
+    def as_public_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "status_code": self.status_code,
+            "provider_status": self.provider_status,
+            "message": self.message,
+        }
+
+
+def _secret_free_text(value: Any, *, api_key: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    sanitized = value.replace(api_key, "[REDACTED]") if api_key else value
+    sanitized = " ".join(sanitized.split())
+    return sanitized[:1_000] or None
+
+
+def _google_failure_from_exception(
+    error: Exception, *, api_key: str | None
+) -> BenchmarkProviderFailure:
+    """Classify Google/API failures from attributes, never their text repr."""
+
+    # google-genai ``APIError`` publishes the HTTP code directly. HTTPX HTTP
+    # errors instead expose it on ``response``. Deliberately do not coerce a
+    # textual value: that would reintroduce exception-string parsing.
+    code = getattr(error, "code", None)
+    status_code = code if isinstance(code, int) and not isinstance(code, bool) else None
+    if status_code is None:
+        response = getattr(error, "response", None)
+        response_code = getattr(response, "status_code", None)
+        if isinstance(response_code, int) and not isinstance(response_code, bool):
+            status_code = response_code
+
+    try:
+        from httpx import TimeoutException
+    except ImportError:  # pragma: no cover - CrewAI's Gemini extra requires HTTPX
+        timeout_types: tuple[type[BaseException], ...] = (TimeoutError,)
+    else:
+        timeout_types = (TimeoutError, TimeoutException)
+
+    if status_code == 429:
+        kind = "rate_limit"
+    elif status_code == 504 or isinstance(error, timeout_types):
+        kind = "timeout"
+    elif status_code is not None or any(
+        hasattr(error, field) for field in ("code", "status", "message")
+    ):
+        kind = "provider_http_error"
+    else:
+        kind = "runner_error"
+
+    provider_status = _secret_free_text(
+        getattr(error, "status", None), api_key=api_key
+    )
+    message = _secret_free_text(getattr(error, "message", None), api_key=api_key)
+    if message is None:
+        message = (
+            "Google Gemini request timed out"
+            if kind == "timeout"
+            else "Google Gemini provider call failed"
+            if kind != "runner_error"
+            else "CrewAI Google LLM call failed"
+        )
+    return BenchmarkProviderFailure(
+        kind=kind,
+        status_code=status_code,
+        provider_status=provider_status,
+        message=message,
+    )
 
 
 class BenchmarkVerdict(BaseModel):
@@ -149,6 +232,7 @@ class GuardedBenchmarkLLM(BaseLLM):
     _call_budget: BenchmarkCallBudget = PrivateAttr()
     _benchmark_role: str = PrivateAttr()
     _delegate: BaseLLM = PrivateAttr()
+    _provider_failure: BenchmarkProviderFailure | None = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -165,11 +249,33 @@ class GuardedBenchmarkLLM(BaseLLM):
 
     def call(self, *args: Any, **kwargs: Any) -> Any:
         self._call_budget.consume(self._benchmark_role)
-        return self._delegate.call(*args, **kwargs)
+        self._provider_failure = None
+        try:
+            return self._delegate.call(*args, **kwargs)
+        except Exception as exc:
+            if getattr(self._delegate, "provider", None) == "gemini":
+                failure = _google_failure_from_exception(
+                    exc,
+                    api_key=(self.api_key if isinstance(self.api_key, str) else None),
+                )
+                if failure.kind in _STRUCTURED_PROVIDER_FAILURE_KINDS:
+                    self._provider_failure = failure
+            raise
 
     async def acall(self, *args: Any, **kwargs: Any) -> Any:
         self._call_budget.consume(self._benchmark_role)
-        return await self._delegate.acall(*args, **kwargs)
+        self._provider_failure = None
+        try:
+            return await self._delegate.acall(*args, **kwargs)
+        except Exception as exc:
+            if getattr(self._delegate, "provider", None) == "gemini":
+                failure = _google_failure_from_exception(
+                    exc,
+                    api_key=(self.api_key if isinstance(self.api_key, str) else None),
+                )
+                if failure.kind in _STRUCTURED_PROVIDER_FAILURE_KINDS:
+                    self._provider_failure = failure
+            raise
 
     def supports_stop_words(self) -> bool:
         return self._delegate.supports_stop_words()
@@ -184,11 +290,33 @@ class GuardedBenchmarkLLM(BaseLLM):
     def delegate(self) -> BaseLLM:
         return self._delegate
 
+    @property
+    def benchmark_role(self) -> str:
+        return self._benchmark_role
+
+    @property
+    def provider_failure(self) -> dict[str, Any] | None:
+        if self._provider_failure is None:
+            return None
+        return self._provider_failure.as_public_dict()
+
 
 @dataclass(frozen=True)
 class BenchmarkCrewBundle:
     crew: Crew
     call_budget: BenchmarkCallBudget
+
+    @property
+    def provider_failures(self) -> dict[str, dict[str, Any]]:
+        failures: dict[str, dict[str, Any]] = {}
+        for agent in self.crew.agents:
+            llm = agent.llm
+            if not isinstance(llm, GuardedBenchmarkLLM):
+                continue
+            failure = llm.provider_failure
+            if failure is not None:
+                failures[llm.benchmark_role] = failure
+        return failures
 
     def close(self) -> None:
         """Close eager provider clients and scrub their credential references."""
@@ -592,6 +720,15 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
             native_client = getattr(llm.delegate, "_client", None)
             api_client = getattr(native_client, "_api_client", None)
             effective_http = getattr(api_client, "_http_options", None)
+            timeout_seconds = llm.timeout
+            valid_timeout = (
+                isinstance(timeout_seconds, (int, float))
+                and not isinstance(timeout_seconds, bool)
+                and timeout_seconds > 0
+            )
+            expected_timeout_ms = (
+                int(float(timeout_seconds) * 1_000) if valid_timeout else None
+            )
             wire_probe = (
                 api_client._build_request(
                     "post",
@@ -606,7 +743,8 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                 or llm.temperature is not None
                 or llm.base_url is not None
                 or llm.max_tokens != 500
-                or llm.timeout != 45
+                or not valid_timeout
+                or agent.max_execution_time != int(float(timeout_seconds))
                 or llm.additional_params != expected_outer_params
                 or getattr(llm.delegate, "max_output_tokens", None) != 500
                 or getattr(llm.delegate, "use_vertexai", None) is not False
@@ -628,7 +766,7 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                 or thinking.include_thoughts is not False
                 or not isinstance(http_options, types.HttpOptions)
                 or http_options.api_version != "v1"
-                or http_options.timeout != 45_000
+                or http_options.timeout != expected_timeout_ms
                 or http_options.extra_body != {"store": False}
                 or http_options.retry_options is None
                 or http_options.retry_options.attempts != 1
@@ -648,6 +786,7 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                 or native_client.vertexai
                 or effective_http is None
                 or effective_http.api_version != "v1"
+                or effective_http.timeout != expected_timeout_ms
                 or effective_http.extra_body != {"store": False}
                 or effective_http.retry_options is None
                 or effective_http.retry_options.attempts != 1

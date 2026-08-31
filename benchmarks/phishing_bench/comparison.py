@@ -32,7 +32,11 @@ from .quality_scoring import (
     _validate_scoring_bundle,
     _validate_quality_labels,
 )
-from .scoring import _load_results, _validate_run_integrity
+from .scoring import (
+    _execution_observability,
+    _load_results,
+    _validate_run_integrity,
+)
 
 
 VARIANT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -277,11 +281,38 @@ def _validate_metrics_against_records(
     observed_cost = round(
         sum(float(result.get("observed_cost_usd", 0)) for result in results), 10
     )
-    if metrics.get("cost", {}).get("observed_usd") != observed_cost:
+    cost_metrics = _require_mapping(metrics.get("cost"), "cost metrics")
+    if cost_metrics.get("observed_usd") != observed_cost:
         raise ContractError("observed cost differs from raw ResultRecords")
     outbound = sum(int(result.get("outbound_attempts", 0)) for result in results)
-    if metrics.get("attempts", {}).get("outbound") != outbound:
+    attempt_metrics = _require_mapping(metrics.get("attempts"), "attempt metrics")
+    if attempt_metrics.get("outbound") != outbound:
         raise ContractError("outbound attempt total differs from raw ResultRecords")
+    observability = _execution_observability(
+        results,
+        expected_workflows=len(scored),
+        attempt_events=read_jsonl(run_dir / "attempts.jsonl"),
+    )
+    for key, expected in observability.items():
+        if key in attempt_metrics and attempt_metrics[key] != expected:
+            raise ContractError(
+                f"{key} differs from raw ResultRecords and planned samples"
+            )
+    if (
+        "workflows" in attempt_metrics
+        and "started_workflows" in attempt_metrics
+        and attempt_metrics["workflows"] != observability["started_workflows"]
+    ):
+        raise ContractError("workflow total differs from started workflow count")
+    ledger = _require_mapping(
+        read_json(run_dir / "budget_ledger.json"), "budget ledger"
+    )
+    ledger_reservation = ledger.get("reserved_or_observed_cost_usd")
+    if (
+        "ledger_reserved_or_observed_usd" in cost_metrics
+        and cost_metrics["ledger_reserved_or_observed_usd"] != ledger_reservation
+    ):
+        raise ContractError("ledger cost reservation differs from scored metrics")
 
     successful_latencies = [
         float(result["latency_ms"])
@@ -521,6 +552,12 @@ def _run_row(run: LoadedRun) -> dict[str, Any]:
     schema_valid_count = sum(
         int(result.get("response_schema_valid") is True) for result in run.results
     )
+    observability = _execution_observability(
+        run.results,
+        expected_workflows=len(run.scored),
+        attempt_events=read_jsonl(run.run_dir / "attempts.jsonl"),
+    )
+    ledger = read_json(run.run_dir / "budget_ledger.json")
     return {
         "variant_id": run.variant_id,
         "run_id": manifest["run_id"],
@@ -574,17 +611,31 @@ def _run_row(run: LoadedRun) -> dict[str, Any]:
         "outbound_calls": attempts.get("outbound"),
         "retries": attempts.get("retries"),
         "cost_unknown_attempts": attempts.get("cost_unknown_attempts"),
-        "workflows": attempts.get("workflows")
-        if attempts.get("workflows") is not None
-        else len(run.results)
-        if config.get("adapter") == "crewai_sequential_offline"
-        else int(attempts.get("outbound", 0)) - int(attempts.get("retries", 0)),
+        "workflows": attempts.get(
+            "started_workflows", observability["started_workflows"]
+        ),
+        "planned_workflows": attempts.get(
+            "planned_workflows", observability["planned_workflows"]
+        ),
+        "started_workflows": attempts.get(
+            "started_workflows", observability["started_workflows"]
+        ),
+        "not_attempted": attempts.get(
+            "not_attempted", observability["not_attempted"]
+        ),
+        "provider_failures": attempts.get(
+            "provider_failures", observability["provider_failures"]
+        ),
         "input_tokens": usage.get("input_tokens"),
         "cached_input_tokens": usage.get("cached_input_tokens"),
         "output_tokens": usage.get("output_tokens"),
         "reasoning_tokens": usage.get("reasoning_tokens"),
         "total_tokens": usage.get("total_tokens"),
         "observed_cost_usd": cost.get("observed_usd"),
+        "ledger_reserved_or_observed_cost_usd": cost.get(
+            "ledger_reserved_or_observed_usd",
+            ledger.get("reserved_or_observed_cost_usd"),
+        ),
         "observed_cost_usd_per_message": cost.get("observed_usd_per_message"),
         "latency_min_ms": latency.get("min"),
         "latency_median_ms": latency.get("median"),
@@ -953,6 +1004,10 @@ def compare_runs(
             "run_id": run.manifest["run_id"],
             "run_manifest_sha256": sha256_file(run.run_dir / "run_manifest.json"),
             "results_sha256": sha256_file(run.run_dir / "results.jsonl"),
+            "attempts_sha256": sha256_file(run.run_dir / "attempts.jsonl"),
+            "budget_ledger_sha256": sha256_file(
+                run.run_dir / "budget_ledger.json"
+            ),
             "metrics_sha256": sha256_file(run.run_dir / "scoring" / "metrics.json"),
             "scored_results_sha256": sha256_file(
                 run.run_dir / "scoring" / "scored_results.jsonl"

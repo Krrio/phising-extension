@@ -49,6 +49,17 @@ TERMINAL_STATUSES = {
     "incomplete_output",
     "invalid",
 }
+PROVIDER_FAILURE_STATUSES = {
+    "rate_limit",
+    "provider_http_error",
+    "timeout",
+    "network_error",
+    "tls_certificate_error",
+    "invalid_provider_json",
+    "invalid_provider_response",
+    "response_too_large",
+    "refusal",
+}
 CRITICAL_SECURITY_EVENT_TYPES = {
     "unauthorized_tool_execution",
     "unauthorized_network_egress",
@@ -64,6 +75,43 @@ ALLOWED_SECURITY_EVENT_TYPES = CRITICAL_SECURITY_EVENT_TYPES | {
     "secret_like_output",
 }
 EVIDENCE_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _execution_observability(
+    results: list[dict[str, Any]],
+    *,
+    expected_workflows: int,
+    attempt_events: list[dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Separate attempted work from terminal placeholders written after a stop.
+
+    Every expected sample remains a conservative technical outcome in scoring.
+    This projection only describes how much provider-facing work actually began.
+    """
+
+    started_workflows = sum(
+        bool(result.get("attempt_ids"))
+        or str(result.get("status"))
+        not in {"campaign_stopped", "budget_exhausted"}
+        for result in results
+    )
+    if attempt_events is None:
+        provider_failures = sum(
+            str(result.get("status")) in PROVIDER_FAILURE_STATUSES
+            for result in results
+        )
+    else:
+        provider_failures = sum(
+            event.get("event") == "finished"
+            and str(event.get("status")) in PROVIDER_FAILURE_STATUSES
+            for event in attempt_events
+        )
+    return {
+        "planned_workflows": expected_workflows,
+        "started_workflows": started_workflows,
+        "not_attempted": max(expected_workflows - started_workflows, 0),
+        "provider_failures": provider_failures,
+    }
 
 
 def _validate_labels(labels: list[dict[str, Any]]) -> None:
@@ -594,6 +642,15 @@ def score_run(
     )
     observed_cost = round(sum(float(result.get("observed_cost_usd", 0)) for result in results), 10)
     cost_unknown_attempts = sum(int(result.get("cost_unknown_attempts", 0)) for result in results)
+    execution_observability = _execution_observability(
+        results,
+        expected_workflows=len(labels),
+        attempt_events=read_jsonl(run_dir / "attempts.jsonl"),
+    )
+    ledger = read_json(run_dir / "budget_ledger.json")
+    ledger_reserved_or_observed_cost = round(
+        float(ledger["reserved_or_observed_cost_usd"]), 10
+    )
     critical_security_events = sum(
         1
         for result in results
@@ -702,11 +759,13 @@ def score_run(
             "retries": retry_attempts,
             "cost_unknown_attempts": cost_unknown_attempts,
             "semantics": "llm_calls" if is_crewai else "direct_provider_attempts",
-            "workflows": len(results) if is_crewai else attempts - retry_attempts,
+            "workflows": execution_observability["started_workflows"],
+            **execution_observability,
         },
         "usage": token_totals,
         "cost": {
             "observed_usd": observed_cost,
+            "ledger_reserved_or_observed_usd": ledger_reserved_or_observed_cost,
             "observed_usd_per_message": round(observed_cost / expected_count, 10)
             if expected_count and cost_unknown_attempts == 0
             else None,
@@ -752,10 +811,18 @@ def score_run(
         ("provider_metadata_omissions", provider_metadata_omissions),
         ("outbound_attempts", attempts),
         ("retry_attempts", retry_attempts),
+        ("planned_workflows", execution_observability["planned_workflows"]),
+        ("started_workflows", execution_observability["started_workflows"]),
+        ("not_attempted", execution_observability["not_attempted"]),
+        ("provider_failures", execution_observability["provider_failures"]),
         ("cost_unknown_attempts", cost_unknown_attempts),
         ("input_tokens", token_totals["input_tokens"]),
         ("output_tokens", token_totals["output_tokens"]),
         ("observed_cost_usd", _fixed_float(observed_cost)),
+        (
+            "ledger_reserved_or_observed_cost_usd",
+            _fixed_float(ledger_reserved_or_observed_cost),
+        ),
         ("median_latency_ms", metrics["latency_ms"]["median"]),
     ]
     stream = io.StringIO()
@@ -785,7 +852,11 @@ def score_run(
         else "Raport OpenAI Direct smoke"
     )
     attempt_line = (
-        f"LLM calls: {attempts}; workflow retry: {retry_attempts}"
+        f"LLM calls: {attempts}; rozpoczęte workflows: "
+        f"{execution_observability['started_workflows']}; nieuruchomione: "
+        f"{execution_observability['not_attempted']}; błędy providera: "
+        f"{execution_observability['provider_failures']}; workflow retry: "
+        f"{retry_attempts}"
         if is_crewai
         else f"outbound attempts: {attempts}, w tym retry: {retry_attempts}"
     )
@@ -826,6 +897,7 @@ Etap: `ENGINEERING_PILOT`
 - krytyczne security events: {critical_security_events};
 - diagnostyczne braki provider metadata: {provider_metadata_omissions};
 - znany koszt z usage: ${_fixed_float(observed_cost)};
+- koszt znany lub konserwatywnie zarezerwowany w ledgerze: ${_fixed_float(ledger_reserved_or_observed_cost)};
 - mediana end-to-end latency rekordów ze statusem `success`: {metrics['latency_ms']['median']} ms.
 
 ## Interpretacja

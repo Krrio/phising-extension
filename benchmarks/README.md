@@ -16,7 +16,9 @@ Przed implementacją wprowadzono pięć korekt:
 
 Gotowe, wykonane i policzone jest sześć torów: bazowy OpenAI Direct, CrewAI Offline, OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17` oraz Google Direct `gemini-3.5-flash-lite` i `gemini-3.1-flash-lite`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Wykonany offline eksport `FIVE_WAY_PILOT_030_001` obejmuje pierwsze pięć torów; po zakończeniu całej nowej serii powstanie nowy eksport, bez nadpisywania starego.
 
-Oba smoke Gemini 3.7 są zachowanymi negatywnymi wynikami technicznymi. `SMOKE_001` zakończył 10/10 prób timeoutem po 45 s, a diagnostyczny `SMOKE_002` zakończył 5/5 prób timeoutem po 120 s mimo wyłączenia retry. W obu runach brak odpowiedzi i usage; łączna konserwatywna rezerwa nierozstrzygniętego kosztu to `0,124812 USD`. Tor Direct Gemini 3.7 przez synchroniczne stateless Interactions API jest zamknięty, a pilot zablokowany. CrewAI Offline z natywnym Google `gemini-3.5-flash-lite` pozostaje przygotowany, ale niewykonany live.
+Oba smoke Gemini 3.7 są zachowanymi negatywnymi wynikami technicznymi. `SMOKE_001` zakończył 10/10 prób timeoutem po 45 s, a diagnostyczny `SMOKE_002` zakończył 5/5 prób timeoutem po 120 s mimo wyłączenia retry. W obu runach brak odpowiedzi i usage; łączna konserwatywna rezerwa nierozstrzygniętego kosztu to `0,124812 USD`. Tor Direct Gemini 3.7 przez synchroniczne stateless Interactions API jest zamknięty, a pilot zablokowany.
+
+Pierwszy live smoke CrewAI Offline + natywny Google `gemini-3.5-flash-lite` także jest zachowanym `READINESS_FAIL`: cztery pierwsze calle zakończyły się `504 DEADLINE_EXCEEDED` przy lokalnym limicie 45 s, a piąty jawnym `503 UNAVAILABLE` z komunikatem o wysokim obciążeniu. Wszystkie pięć workflow zatrzymało się na roli `domain_analyst`; nie było retry ani dalszych ról. Przygotowany `SMOKE_002` zwiększa wyłącznie timeout do 120 s, nadal ma jedną fizyczną próbę i zatrzymuje całą kampanię po pierwszym przejściowym 429, 5xx albo lokalnym timeout.
 
 Aktualne wyniki opisowe pilotów na tych samych 30 syntetycznych wiadomościach:
 
@@ -93,7 +95,9 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001/` | zablokowany po dwóch negatywnych smoke; nie uruchamiać |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
-| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_{SMOKE_001,PILOT_030_001}/` | przygotowany natywny CrewAI+Gemini: 15/90 calls, cap 0,10/0,50 USD; jeszcze bez live wyników |
+| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5 calli pierwszej roli, 4 × 504 i 1 × 503, bez retry; nie uruchamiać ponownie |
+| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002/` | diagnostyka 120 s, zero retry, transient fail-fast, maksymalnie 15 calls / 0,10 USD |
+| `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001/` | pierwotny pilot 45 s; zablokowany do wyniku `SMOKE_002` i utworzenia nowego campaign ID |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
 | `phishing_bench/gemini_direct.py` | bezpośredni transport Gemini Interactions z izolacją sieci, jawną oczekiwaną rewizją schematu, limitem odpowiedzi i bezpiecznym parsowaniem usage |
@@ -502,37 +506,20 @@ Diagnostyczny run `BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002__20260831T111704Z_
 
 Rezerwa zakłada skrajnie konserwatywny rozmiar wejścia i pełne 500 output tokens; nie jest prognozą rachunku. Rzeczywisty koszt pochodzi z usage, a rozstrzygający pozostaje dashboard Google. Zamrożona cena Gemini 3.7 (`0,75 USD/M` input, `0,075 USD/M` cached input, `3,75 USD/M` output) obowiązuje tylko do 31 grudnia 2026. Harness automatycznie odrzuci nowy płatny run po tej dacie; historyczny scoring nadal działa. Gemini 3.1 używa `0,25/0,025/1,50 USD/M`.
 
-### 1. Testy, validate i dry-run sześciu aktywnych kampanii — 0 USD
+### 1. Testy, validate i dry-run bieżącej kampanii — 0 USD
 
 Najpierw uruchom poniższe testy i dry-runy. Gdy przejdą, commituj i pushuj kod kampanii; przed pierwszym live runem `git status --short` ma być pusty. Komendy w tym kroku nie wymagają klucza i nie wysyłają requestów:
 
 ```bash
 backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -v
 
-G31_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_SMOKE_001/runtime_config.json"
-G31_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_PILOT_030_001/runtime_config.json"
-G37_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002/runtime_config.json"
-G37_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001/runtime_config.json"
-CREW_GEMINI_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001/runtime_config.json"
-CREW_GEMINI_PILOT_CONFIG="benchmarks/campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001/runtime_config.json"
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaign "$G31_SMOKE_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$G31_SMOKE_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaign "$G31_PILOT_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$G31_PILOT_CONFIG"
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaign "$G37_SMOKE_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$G37_SMOKE_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaign "$G37_PILOT_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$G37_PILOT_CONFIG"
+CREW_GEMINI_SMOKE_CONFIG="benchmarks/campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002/runtime_config.json"
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaign "$CREW_GEMINI_SMOKE_CONFIG"
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$CREW_GEMINI_SMOKE_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate --campaign "$CREW_GEMINI_PILOT_CONFIG"
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run --campaign "$CREW_GEMINI_PILOT_CONFIG"
 ```
 
-Każdy dry-run musi zakończyć się `READY_FOR_MANUAL_LIVE_CONFIRMATION` oraz tekstem `DRY-RUN: nie wykonano żadnego requestu`. W CrewAI dodatkowo sprawdź `crewai=1.15.8`, `google-genai=1.65.0`, trzy role, `api_version=v1`, `wire_store_false_verified=true`, `provider_max_attempts=1`, `trust_env=false`, `follow_redirects=false`, `async_transport=httpx`, `use_vertexai=false` i `provider_calls_made=0`.
+Każdy aktywny dry-run musi zakończyć się `READY_FOR_MANUAL_LIVE_CONFIRMATION` oraz tekstem `DRY-RUN: nie wykonano żadnego requestu`. Zamknięte piloty Gemini 3.7 i CrewAI+Gemini 45 s zwracają `LIVE_BLOCKED`. W CrewAI dodatkowo sprawdź `crewai=1.15.8`, `google-genai=1.65.0`, trzy role, `api_version=v1`, `wire_store_false_verified=true`, `provider_max_attempts=1`, `trust_env=false`, `follow_redirects=false`, `async_transport=httpx`, `use_vertexai=false` i `provider_calls_made=0`.
 
 ### 2. Direct Gemini 3.1 — etap zakończony
 
@@ -594,6 +581,12 @@ Status tego toru to techniczne odrzucenie synchronicznego stateless Direct adapt
 
 Ten tor wykonuje trzy płatne calls na wiadomość. Native SDK nie używa Interactions API; harness wymusza GenerateContent v1, root `store=false`, minimal thinking bez zwracania thoughts, jeden fizyczny attempt, brak Vertex/ambient credentials oraz dokładnie jeden call na rolę.
 
+Pierwszy run `BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001__20260831T113802Z__d92e2bc2` zakończył się `READINESS_FAIL`. Wykonał dokładnie pięć calli `domain_analyst`: cztery `504` po `44,70–44,82 s` i jeden `503` po `10,489 s`. Nie uruchomił `content_analyst` ani `orchestrator`, nie wykonał retry, zapisał pięć terminalnych rekordów oraz dziesięć lokalnych tool events z `network_used=false`. Usage i koszt pięciu calli są nieznane; ledger zachował konserwatywną rezerwę `0,0553062 USD`, więc `$0` observed nie dowodzi braku opłaty.
+
+Google zaleca zwiększenie deadline'u klienta przy `504`, a `503` traktuje jako przejściowy błąd dostępności. Dlatego `SMOKE_001` pozostaje bez zmian i nie wolno go ponawiać. Nowy `SMOKE_002` zachowuje model, dane, prompty, GenerateContent v1, thinking, schema i zero retry, ale używa timeoutu 120 s. Po pierwszym 429, 5xx albo lokalnym timeout działa fail-fast: pozostałe rekordy otrzymują `campaign_stopped`, więc awaria dostępności nie zużyje całego limitu. Przed live sprawdź billing/usage Google oraz [status Google AI Studio i Gemini API](https://aistudio.google.com/status) i odczekaj po incydencie; to jedna z góry zaplanowana próba diagnostyczna, nie wybieranie korzystniejszego wyniku.
+
+Scoring rozdziela teraz `planned_workflows`, `started_workflows`, `not_attempted` i `provider_failures`. Rekordy `campaign_stopped` nadal konserwatywnie pozostają błędami technicznymi w mianownikach, ale nie są błędnie przedstawiane jako osobne wywołania providera. `ledger_reserved_or_observed_usd` jest górną rezerwą bezpieczeństwa, nie potwierdzonym rachunkiem; rzeczywisty spend nadal sprawdzaj w dashboardzie Google.
+
 ```bash
 read -s GEMINI_API_KEY
 export GEMINI_API_KEY
@@ -601,12 +594,12 @@ export GEMINI_API_KEY
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
   --campaign "$CREW_GEMINI_SMOKE_CONFIG" \
   --live \
-  --confirm-campaign BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001
+  --confirm-campaign BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002
 
 unset GEMINI_API_KEY
 
 CREW_GEMINI_SMOKE_RUN="$(find "$PWD/benchmark-runs" -maxdepth 1 -type d \
-  -name 'BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001__*' \
+  -name 'BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002__*' \
   -print | sort | tail -n 1)"
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
@@ -616,29 +609,7 @@ backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
 cat "$CREW_GEMINI_SMOKE_RUN/scoring/report.md"
 ```
 
-Po `READINESS_PASS` ręcznie sprawdź także `calls.jsonl`: dokładnie 15 wpisów w powtarzalnej kolejności `domain_analyst → content_analyst → orchestrator`, finish reason `stop`, usage dla każdego calla i zero dodatkowej czwartej próby. Dopiero wtedy:
-
-```bash
-read -s GEMINI_API_KEY
-export GEMINI_API_KEY
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign "$CREW_GEMINI_PILOT_CONFIG" \
-  --live \
-  --confirm-campaign BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001
-
-unset GEMINI_API_KEY
-
-CREW_GEMINI_PILOT_RUN="$(find "$PWD/benchmark-runs" -maxdepth 1 -type d \
-  -name 'BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001__*' \
-  -print | sort | tail -n 1)"
-
-backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py score \
-  --run-dir "$CREW_GEMINI_PILOT_RUN" \
-  --labels benchmarks/secure_scoring/openai_pilot_030_v1/labels.jsonl
-
-cat "$CREW_GEMINI_PILOT_RUN/scoring/report.md"
-```
+Po `READINESS_PASS` ręcznie sprawdź także `calls.jsonl`: dokładnie 15 wpisów w powtarzalnej kolejności `domain_analyst → content_analyst → orchestrator`, finish reason `stop`, usage dla każdego calla i zero dodatkowej czwartej próby. Nie uruchamiaj istniejącego `PILOT_030_001`, ponieważ nadal ma timeout 45 s. CLI i runner blokują live tego campaign ID, podobnie jak zamkniętego pilota Gemini 3.7. Dopiero po pozytywnym smoke należy zamrozić nowy pilot z osobnym campaign ID i timeoutem wynikającym z diagnostyki.
 
 Po każdym pilocie zachowaj run bez zmian. Nie powtarzaj płatnego testu na podstawie słabego wyniku i nie dostrajaj promptu na tych 30 przypadkach. Nowy model, cena, prompt, provider API lub konfiguracja CrewAI wymagają nowego campaign ID.
 
@@ -724,7 +695,7 @@ Statusy końcowe:
 2. Zachować negatywne Gemini 3.5 `SMOKE_001` i `SMOKE_002`, pozytywny `SMOKE_003` oraz zakończony `PILOT_030_002`; żadnego z tych campaign IDs nie uruchamiać ponownie.
 3. Zachować zakończony Gemini 3.1 smoke i pilot: 30/30 sukcesów technicznych, `TP=15, FP=3, TN=12, FN=0`, koszt `0,021775 USD`, mediana `3279,744 ms` i `PILOT_HOLD` przez dwa benign `hide`.
 4. Zachować oba negatywne smoke Gemini 3.7: `SMOKE_001` ma 10 timeoutów po 45 s i rezerwę nieznanego kosztu `0,083208 USD`; `SMOKE_002` ma 5 timeoutów po 120 s, zero retry i rezerwę `0,041604 USD`. Sprawdzić łącznie maksymalnie `0,124812 USD` w dashboardzie Google, nie uruchamiać tych campaign IDs ponownie i nie uruchamiać pilota 3.7.
-5. Po commit/push aktualizacji dokumentacji wykonać osobny smoke CrewAI+Gemini 3.5, a pilot dopiero po ręcznym potwierdzeniu dokładnie 15 poprawnych calls i braku czwartej próby.
+5. Zachować negatywny CrewAI+Gemini `SMOKE_001`: pięć calli wyłącznie pierwszej roli, 4 × 504, 1 × 503, zero retry i `0,0553062 USD` konserwatywnej rezerwy. Po sprawdzeniu billingu/statusu i cooldownie wykonać dokładnie raz `SMOKE_002` z timeoutem 120 s oraz transient fail-fast; pilot dopiero po 15/15 poprawnych calls i z nowym campaign ID.
 6. Ewentualny powrót do Gemini 3.7 przez background execution lub GenerateContent traktować jako nowy eksperyment z osobnym campaign ID dopiero po zakończeniu bieżącej serii i ponownej decyzji budżetowej.
 7. Zachować eksport pięciowariantowy. Para Direct OpenAI–Direct Gemini ma typ `model_or_provider_delta`; każde porównanie CrewAI+OpenAI pozostaje `system_bundle_delta`, a CrewAI+Gemini jest `cross_api_system_bundle_delta`.
 8. Dopiero potem zdecydować, czy budżet uzasadnia najwyżej 1–2 kolejne tanie adaptery. Dokładne modele, snapshoty i ceny ponownie zweryfikować przed zamrożeniem każdego campaign ID.
@@ -747,7 +718,7 @@ Budowa harnessu, danych i anotacji jest przygotowaniem przed startem 30-godzinne
 - OpenAI, [Chat Completions API](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions)
 - OpenAI, [kontrola danych API](https://developers.openai.com/api/docs/guides/your-data)
 - Cohere, [Command R7B](https://docs.cohere.com/docs/command-r7b) i [Structured Outputs](https://docs.cohere.com/v2/docs/structured-outputs)
-- Google, [Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), [REST API v1](https://ai.google.dev/api/interactions-api-v1), [zmiany protokołu z maja 2026](https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026), [thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking), [ceny](https://ai.google.dev/gemini-api/docs/pricing) i [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output)
+- Google, [Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), [REST API v1](https://ai.google.dev/api/interactions-api-v1), [zmiany protokołu z maja 2026](https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026), [thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking), [ceny](https://ai.google.dev/gemini-api/docs/pricing), [błędy i retry](https://ai.google.dev/gemini-api/docs/troubleshooting) i [Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 - Google, [Gemini 3.1 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite), [Gemini 3.7 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash), [zmiany i termin ceny 3.7](https://ai.google.dev/gemini-api/docs/latest-model), [background execution i standardowe timeouty](https://ai.google.dev/gemini-api/docs/background-execution) oraz [GenerateContent request `store`](https://ai.google.dev/api/generate-content)
 - Mistral, [Mistral Small 4](https://docs.mistral.ai/models/mistral-small-4-0-26-03) i [Structured Outputs](https://docs.mistral.ai/studio/conversations/structured-output/custom)
 - CrewAI, [Agents 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/agents), [Tasks 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/tasks), [Crews 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/crews) i [LLMs 1.15.8](https://docs.crewai.com/v1.15.8/en/concepts/llms)

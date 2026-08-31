@@ -9,6 +9,7 @@ from pathlib import Path
 from phishing_bench.contracts import (
     CREWAI_PROFILES,
     ContractError,
+    assert_campaign_live_allowed,
     load_and_validate_campaign,
 )
 from phishing_bench.comparison import compare_runs, parse_named_run
@@ -113,15 +114,23 @@ def main(argv: list[str] | None = None) -> int:
                         args.campaign, REPO_ROOT, check_local_tls=True
                     )
                 print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-                print(
-                    "\nDRY-RUN: nie wykonano żadnego requestu. "
-                    "Do live wymagane są --live oraz --confirm-campaign z dokładnym campaign_id."
-                )
+                if report.get("status") == "LIVE_BLOCKED":
+                    print(
+                        "\nDRY-RUN: nie wykonano żadnego requestu. "
+                        "Ta kampania jest zamknięta i jej live run jest zablokowany."
+                    )
+                else:
+                    print(
+                        "\nDRY-RUN: nie wykonano żadnego requestu. "
+                        "Do live wymagane są --live oraz --confirm-campaign "
+                        "z dokładnym campaign_id."
+                    )
                 return 0
             if args.confirm_campaign != config["campaign_id"]:
                 raise ContractError(
                     "live run wymaga --confirm-campaign " + str(config["campaign_id"])
                 )
+            assert_campaign_live_allowed(config)
             api_key = api_key_from_environment(args.campaign, REPO_ROOT)
             if not api_key:
                 raise ContractError(
