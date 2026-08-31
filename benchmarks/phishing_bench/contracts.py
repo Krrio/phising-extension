@@ -86,9 +86,28 @@ CREWAI_GEMINI35_FLASH_LITE_SMOKE_VARIANTS = {
         1800,
     ),
 }
+CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_VARIANTS = {
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001": (
+        "crewai-offline__google-native__gemini-3.5-flash-lite__crew-v1__thinking-minimal__pilot030-v1",
+        45,
+        0,
+        90,
+        0.50,
+        7200,
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002": (
+        "crewai-offline__google-native__gemini-3.5-flash-lite__crew-v1__thinking-minimal__pilot030__timeout120__transient-fail-fast__no-retry-v2",
+        120,
+        0,
+        90,
+        0.50,
+        7200,
+    ),
+}
 CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS = frozenset(
     {
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002",
     }
 )
 LIVE_BLOCKED_CAMPAIGNS = {
@@ -97,8 +116,8 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "technically"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001": (
-        "obsolete 45-second timeout; a new pilot campaign ID may be created "
-        "only after SMOKE_002 passes"
+        "obsolete 45-second timeout; replaced by PILOT_030_002 after the "
+        "successful SMOKE_002"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001": (
         "closed after the recorded 4 x HTTP 504 and 1 x HTTP 503 provider "
@@ -613,9 +632,12 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     is_crewai_gemini_smoke = (
         evaluation_profile == CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE
     )
+    is_crewai_gemini_quality = (
+        evaluation_profile == CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_PROFILE
+    )
     if (
         is_crewai
-        and not is_crewai_gemini_smoke
+        and not (is_crewai_gemini_smoke or is_crewai_gemini_quality)
         and config["request_timeout_seconds"] != 45
     ):
         raise ContractError("CrewAI Offline requires request_timeout_seconds=45")
@@ -654,6 +676,24 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         if actual_variant != expected_variant:
             raise ContractError(
                 "CrewAI Gemini smoke timeout/fail-fast budget variant drift"
+            )
+    if is_crewai_gemini_quality:
+        expected_variant = CREWAI_GEMINI35_FLASH_LITE_QUALITY_PILOT_VARIANTS.get(
+            config["campaign_id"]
+        )
+        if expected_variant is None:
+            raise ContractError("unsupported CrewAI Gemini quality pilot campaign ID")
+        actual_variant = (
+            config["config_id"],
+            config["request_timeout_seconds"],
+            config["max_retries_per_sample"],
+            budget["max_attempts"],
+            float(budget["max_cost_usd"]),
+            budget["max_wall_seconds"],
+        )
+        if actual_variant != expected_variant:
+            raise ContractError(
+                "CrewAI Gemini quality pilot timeout/fail-fast budget variant drift"
             )
     if evaluation_profile in DIRECT_SMOKE_PROFILES:
         if (

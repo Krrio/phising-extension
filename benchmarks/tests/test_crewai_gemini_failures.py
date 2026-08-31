@@ -39,8 +39,17 @@ SMOKE_TIMEOUT_CONFIG = (
     / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002"
     / "runtime_config.json"
 )
+PILOT_TIMEOUT_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002"
+    / "runtime_config.json"
+)
 SMOKE_LABELS = (
     BENCHMARKS_DIR / "secure_scoring" / "openai_smoke_v1" / "labels.jsonl"
+)
+PILOT_LABELS = (
+    BENCHMARKS_DIR / "secure_scoring" / "openai_pilot_030_v1" / "labels.jsonl"
 )
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
 FAKE_KEY = "gemini-crewai_FAKE_SECRET_failure_metadata_123456"
@@ -312,6 +321,75 @@ class CrewAIGeminiFailureTests(unittest.TestCase):
                             FAKE_KEY,
                             (run_dir / artifact).read_text(encoding="utf-8"),
                         )
+
+    def test_transient_google_failure_stops_quality_pilot_after_first_sample(
+        self,
+    ) -> None:
+        config, _ = load_and_validate_campaign(PILOT_TIMEOUT_CONFIG, REPO_ROOT)
+        executor_calls = 0
+
+        def fake_executor(**kwargs: object) -> CrewWorkflowExecution:
+            nonlocal executor_calls
+            del kwargs
+            executor_calls += 1
+            if executor_calls > 1:
+                self.fail("quality campaign should stop before a second workflow")
+            return CrewWorkflowExecution(
+                raw_output=None,
+                calls=(
+                    CrewCallObservation(
+                        call_id="quality-failed-call-1",
+                        role="domain_analyst",
+                        task_name="domain_analysis",
+                        request_sha256=sha256_text("quality failed request"),
+                        response_sha256=None,
+                        model=config["requested_model"],
+                        usage=None,
+                        latency_ms=10_000.0,
+                        finish_reason=None,
+                        response_id=None,
+                        status="failed",
+                        error="Provider temporarily unavailable.",
+                        error_kind="provider_http_error",
+                        status_code=503,
+                        provider_status="UNAVAILABLE",
+                    ),
+                ),
+                runtime_audit={"fake": True},
+                error="Provider temporarily unavailable.",
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_crewai_campaign(
+                config_path=PILOT_TIMEOUT_CONFIG,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                workflow_executor=fake_executor,
+            )
+            scoring_dir = score_run(
+                run_dir=run_dir,
+                labels_path=PILOT_LABELS,
+                output_dir=None,
+                repo_root=REPO_ROOT,
+            )
+            results = read_jsonl(run_dir / "results.jsonl")
+            calls = read_jsonl(run_dir / "calls.jsonl")
+            metrics = read_json(scoring_dir / "metrics.json")
+
+        self.assertEqual(executor_calls, 1)
+        self.assertEqual(
+            [row["status"] for row in results],
+            ["provider_http_error"] + ["campaign_stopped"] * 29,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(metrics["campaign_status"], "PILOT_HOLD")
+        self.assertEqual(metrics["records"]["technical_failures"], 30)
+        self.assertEqual(metrics["confusion_matrix"]["total"], 30)
+        self.assertEqual(metrics["attempts"]["outbound"], 1)
+        self.assertEqual(metrics["attempts"]["started_workflows"], 1)
+        self.assertEqual(metrics["attempts"]["not_attempted"], 29)
+        self.assertEqual(metrics["attempts"]["provider_failures"], 1)
 
 
 if __name__ == "__main__":

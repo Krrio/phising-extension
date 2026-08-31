@@ -61,6 +61,11 @@ PILOT_CONFIG = (
     / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001"
     / "runtime_config.json"
 )
+PILOT_TIMEOUT_CONFIG = (
+    CAMPAIGN_ROOT
+    / "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002"
+    / "runtime_config.json"
+)
 DIRECT_PILOT_CONFIG = (
     CAMPAIGN_ROOT
     / "BUDGET_30H_GOOGLE_GEMINI35_FLASH_LITE_PILOT_030_002"
@@ -87,8 +92,12 @@ FAKE_KEY = "gemini-crewai_FAKE_SECRET_123456"
 
 class CrewAIGeminiContractTests(unittest.TestCase):
     def test_campaigns_are_paired_but_disclose_cross_api_bundle_delta(self) -> None:
-        smoke, smoke_assets = load_and_validate_campaign(SMOKE_CONFIG, REPO_ROOT)
-        pilot, pilot_assets = load_and_validate_campaign(PILOT_CONFIG, REPO_ROOT)
+        smoke, smoke_assets = load_and_validate_campaign(
+            SMOKE_TIMEOUT_CONFIG, REPO_ROOT
+        )
+        pilot, pilot_assets = load_and_validate_campaign(
+            PILOT_TIMEOUT_CONFIG, REPO_ROOT
+        )
         direct, direct_assets = load_and_validate_campaign(
             DIRECT_PILOT_CONFIG, REPO_ROOT
         )
@@ -162,6 +171,31 @@ class CrewAIGeminiContractTests(unittest.TestCase):
         changed["request_timeout_seconds"] = 45
         with self.assertRaisesRegex(
             ContractError, "timeout/fail-fast budget variant drift"
+        ):
+            validate_runtime_config(changed, REPO_ROOT)
+
+    def test_timeout_pilot_is_a_new_frozen_fail_fast_campaign(self) -> None:
+        original, _ = load_and_validate_campaign(PILOT_CONFIG, REPO_ROOT)
+        active, _ = load_and_validate_campaign(PILOT_TIMEOUT_CONFIG, REPO_ROOT)
+
+        self.assertEqual(original["request_timeout_seconds"], 45)
+        self.assertEqual(active["request_timeout_seconds"], 120)
+        self.assertEqual(active["max_retries_per_sample"], 0)
+        self.assertEqual(active["budget"]["max_attempts"], 90)
+        self.assertEqual(active["budget"]["max_cost_usd"], 0.50)
+        self.assertEqual(active["budget"]["max_wall_seconds"], 7200)
+        self.assertNotEqual(original["campaign_id"], active["campaign_id"])
+        self.assertNotEqual(original["config_id"], active["config_id"])
+        self.assertIn("transient-fail-fast", active["config_id"])
+        self.assertIn(
+            active["campaign_id"],
+            read_json(PILOT_MANIFEST)["compatible_campaign_ids"],
+        )
+
+        changed = deepcopy(active)
+        changed["request_timeout_seconds"] = 45
+        with self.assertRaisesRegex(
+            ContractError, "quality pilot timeout/fail-fast budget variant drift"
         ):
             validate_runtime_config(changed, REPO_ROOT)
 
@@ -267,6 +301,26 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         self.assertEqual(report["provider_calls_made"], 0)
         self.assertEqual(
             readiness["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        )
+
+    def test_timeout_pilot_preflight_applies_120_seconds_without_retry(self) -> None:
+        config, assets = load_and_validate_campaign(
+            PILOT_TIMEOUT_CONFIG, REPO_ROOT
+        )
+        report = crewai_runtime_preflight(config, assets)
+        readiness = crewai_readiness_report(PILOT_TIMEOUT_CONFIG, REPO_ROOT)
+
+        agents = report["effective_profile"]["agents"]
+        self.assertEqual([row["timeout"] for row in agents], [120] * 3)
+        self.assertEqual([row["max_execution_time"] for row in agents], [120] * 3)
+        self.assertTrue(all(row["provider_max_attempts"] == 1 for row in agents))
+        self.assertEqual(report["provider_calls_made"], 0)
+        self.assertEqual(
+            readiness["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        )
+        self.assertLessEqual(
+            readiness["required_cost_cap_with_margin_usd"],
+            config["budget"]["max_cost_usd"],
         )
 
     def test_real_crewai_kickoff_makes_exactly_three_mocked_provider_calls_and_cleans_up(self) -> None:
@@ -426,7 +480,7 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         )
 
     def test_fake_pilot_writes_90_calls_and_scores_as_cross_api_bundle(self) -> None:
-        config, assets = load_and_validate_campaign(PILOT_CONFIG, REPO_ROOT)
+        config, assets = load_and_validate_campaign(PILOT_TIMEOUT_CONFIG, REPO_ROOT)
         labels = {row["sample_id"]: row for row in read_jsonl(PILOT_LABELS)}
 
         def executor(**kwargs: Any) -> CrewWorkflowExecution:
@@ -478,7 +532,7 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             run_dir = run_crewai_campaign(
-                config_path=PILOT_CONFIG,
+                config_path=PILOT_TIMEOUT_CONFIG,
                 repo_root=REPO_ROOT,
                 output_root=Path(temporary) / "runs",
                 api_key=FAKE_KEY,
@@ -499,6 +553,9 @@ class CrewAIGeminiRuntimeTests(unittest.TestCase):
         self.assertEqual(len(calls), 90)
         self.assertTrue(all(row["status"] == "success" for row in results))
         self.assertEqual(metrics["attempts"]["outbound"], 90)
+        self.assertEqual(metrics["attempts"]["started_workflows"], 30)
+        self.assertEqual(metrics["attempts"]["not_attempted"], 0)
+        self.assertEqual(metrics["attempts"]["provider_failures"], 0)
         self.assertEqual(metrics["cost"]["observed_usd"], 0.006714)
         self.assertEqual(
             metrics["comparison_scope"]["comparison_name"],

@@ -32,6 +32,9 @@ G37_PILOT_ID = "BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001"
 CREW_GEMINI_PILOT_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001"
 )
+CREW_GEMINI_PILOT_002_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002"
+)
 CREW_GEMINI_SMOKE_001_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001"
 )
@@ -55,14 +58,16 @@ FAKE_KEY = "gemini_FAKE_live_guard_secret_123456"
 
 
 class ClosedCampaignGuardTests(unittest.TestCase):
-    def test_fail_fast_policy_is_frozen_only_for_smoke_002(self) -> None:
+    def test_fail_fast_policy_is_frozen_only_for_active_120_second_campaigns(
+        self,
+    ) -> None:
         self.assertNotIn(
             CREW_GEMINI_SMOKE_001_ID,
             CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS,
         )
         self.assertEqual(
             CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS,
-            frozenset({CREW_GEMINI_SMOKE_002_ID}),
+            frozenset({CREW_GEMINI_SMOKE_002_ID, CREW_GEMINI_PILOT_002_ID}),
         )
 
     def test_closed_direct_pilot_is_not_reported_ready_and_cannot_run(self) -> None:
