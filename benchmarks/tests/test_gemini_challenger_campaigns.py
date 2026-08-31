@@ -45,6 +45,9 @@ CONFIGS = {
     "37_smoke": CAMPAIGN_ROOT
     / "BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_001"
     / "runtime_config.json",
+    "37_smoke_timeout120": CAMPAIGN_ROOT
+    / "BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002"
+    / "runtime_config.json",
     "37_pilot": CAMPAIGN_ROOT
     / "BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001"
     / "runtime_config.json",
@@ -65,6 +68,9 @@ PILOT_MANIFEST = (
 )
 PILOT_LABELS = (
     BENCHMARKS_DIR / "secure_scoring" / "openai_pilot_030_v1" / "labels.jsonl"
+)
+SMOKE_LABELS = (
+    BENCHMARKS_DIR / "secure_scoring" / "openai_smoke_v1" / "labels.jsonl"
 )
 FAKE_KEY = "gemini-challenger_FAKE_SECRET_123456"
 
@@ -130,6 +136,9 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
                 5,
                 0.05,
                 (0.25, 0.025, 1.50),
+                45,
+                1,
+                10,
             ),
             "31_pilot": (
                 GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
@@ -139,6 +148,9 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
                 30,
                 0.25,
                 (0.25, 0.025, 1.50),
+                45,
+                1,
+                60,
             ),
             "37_smoke": (
                 GEMINI37_FLASH_SMOKE_PROFILE,
@@ -148,6 +160,21 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
                 5,
                 0.10,
                 (0.75, 0.075, 3.75),
+                45,
+                1,
+                10,
+            ),
+            "37_smoke_timeout120": (
+                GEMINI37_FLASH_SMOKE_PROFILE,
+                "gemini-3.7-flash",
+                "low",
+                GEMINI_INTERACTIONS_LOW_REQUEST_PROFILE,
+                5,
+                0.05,
+                (0.75, 0.075, 3.75),
+                120,
+                0,
+                5,
             ),
             "37_pilot": (
                 GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
@@ -157,6 +184,9 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
                 30,
                 0.65,
                 (0.75, 0.075, 3.75),
+                45,
+                1,
+                60,
             ),
         }
         smoke_ids = set(read_json(SMOKE_MANIFEST)["compatible_campaign_ids"])
@@ -165,9 +195,18 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
         for name, path in CONFIGS.items():
             with self.subTest(name=name):
                 config, assets = load_and_validate_campaign(path, REPO_ROOT)
-                profile, model, thinking, request_profile, count, cap, prices = expected[
-                    name
-                ]
+                (
+                    profile,
+                    model,
+                    thinking,
+                    request_profile,
+                    count,
+                    cap,
+                    prices,
+                    timeout,
+                    retries,
+                    attempts,
+                ) = expected[name]
                 self.assertEqual(config["evaluation_profile"], profile)
                 self.assertEqual(config["requested_model"], model)
                 self.assertEqual(config["thinking_level"], thinking)
@@ -175,6 +214,9 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
                 self.assertEqual(config["expected_sample_count"], count)
                 self.assertEqual(len(assets["dataset"]), count)
                 self.assertEqual(config["budget"]["max_cost_usd"], cap)
+                self.assertEqual(config["request_timeout_seconds"], timeout)
+                self.assertEqual(config["max_retries_per_sample"], retries)
+                self.assertEqual(config["budget"]["max_attempts"], attempts)
                 pricing = config["pricing_usd_per_million_tokens"]
                 self.assertEqual(
                     (pricing["input"], pricing["cached_input"], pricing["output"]),
@@ -209,6 +251,65 @@ class GeminiChallengerCampaignTests(unittest.TestCase):
             read_json(CONFIGS["37_smoke"])["request_profile"],
             gemini35["request_profile"],
         )
+
+    def test_gemini37_timeout_diagnostic_is_a_new_no_retry_campaign(self) -> None:
+        path = CONFIGS["37_smoke_timeout120"]
+        config, _ = load_and_validate_campaign(path, REPO_ROOT)
+        report = readiness_report(path, REPO_ROOT)
+
+        self.assertEqual(
+            config["campaign_id"],
+            "BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002",
+        )
+        self.assertEqual(config["request_timeout_seconds"], 120)
+        self.assertEqual(config["max_retries_per_sample"], 0)
+        self.assertEqual(config["budget"]["max_attempts"], 5)
+        self.assertEqual(config["budget"]["max_cost_usd"], 0.05)
+        self.assertLessEqual(report["required_cost_cap_with_margin_usd"], 0.05)
+
+        for key, value in (
+            ("request_timeout_seconds", 45),
+            ("max_retries_per_sample", 1),
+            ("config_id", "changed"),
+        ):
+            changed = deepcopy(config)
+            changed[key] = value
+            with self.assertRaises(ContractError):
+                validate_runtime_config(changed, REPO_ROOT)
+
+    def test_gemini37_timeout_diagnostic_makes_five_mocked_calls_without_retry(self) -> None:
+        path = CONFIGS["37_smoke_timeout120"]
+        config, assets = load_and_validate_campaign(path, REPO_ROOT)
+        labels = {row["sample_id"]: row for row in read_jsonl(SMOKE_LABELS)}
+        transport = FakeTransport(
+            [
+                _output(labels[row["sample_id"]]["class_label"] == "malicious")
+                for row in assets["dataset"]
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_campaign(
+                config_path=path,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            scoring = score_run(
+                run_dir=run_dir,
+                labels_path=SMOKE_LABELS,
+                output_dir=None,
+                repo_root=REPO_ROOT,
+            )
+            metrics = read_json(scoring / "metrics.json")
+
+        self.assertEqual(len(transport.calls), 5)
+        self.assertTrue(all(call["timeout"] == 120 for call in transport.calls))
+        self.assertEqual(metrics["attempts"]["outbound"], 5)
+        self.assertEqual(metrics["attempts"]["retries"], 0)
+        self.assertEqual(metrics["campaign_status"], "READINESS_PASS")
 
     def test_config_payload_and_promotional_price_drift_fail_closed(self) -> None:
         config, assets = load_and_validate_campaign(CONFIGS["37_smoke"], REPO_ROOT)

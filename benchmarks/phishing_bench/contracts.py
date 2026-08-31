@@ -44,6 +44,22 @@ GEMINI37_FLASH_SMOKE_PROFILE = "gemini_direct_gemini37_flash_smoke_v1"
 GEMINI37_FLASH_QUALITY_PILOT_PROFILE = (
     "gemini_direct_gemini37_flash_quality_pilot_v1"
 )
+GEMINI37_FLASH_SMOKE_VARIANTS = {
+    "BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_001": (
+        "direct__google__gemini-3.7-flash__prompt-v1__thinking-low__smoke005__stateless-id-omission-audited-v1",
+        45,
+        1,
+        10,
+        0.10,
+    ),
+    "BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002": (
+        "direct__google__gemini-3.7-flash__prompt-v1__thinking-low__smoke005__timeout120__no-retry__stateless-id-omission-audited-v2",
+        120,
+        0,
+        5,
+        0.05,
+    ),
+}
 CREWAI_SMOKE_PROFILE = "crewai_offline_smoke_v1"
 CREWAI_QUALITY_PILOT_PROFILE = "crewai_offline_quality_pilot_v1"
 CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE = (
@@ -549,6 +565,19 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
     budget = config["budget"]
     if not isinstance(budget, dict) or set(budget) != {"max_attempts", "max_cost_usd", "max_wall_seconds"}:
         raise ContractError("invalid budget contract")
+    if evaluation_profile == GEMINI37_FLASH_SMOKE_PROFILE:
+        expected_variant = GEMINI37_FLASH_SMOKE_VARIANTS.get(config["campaign_id"])
+        if expected_variant is None:
+            raise ContractError("unsupported Gemini 3.7 smoke campaign ID")
+        actual_variant = (
+            config["config_id"],
+            config["request_timeout_seconds"],
+            config["max_retries_per_sample"],
+            budget["max_attempts"],
+            float(budget["max_cost_usd"]),
+        )
+        if actual_variant != expected_variant:
+            raise ContractError("Gemini 3.7 smoke timeout/retry budget variant drift")
     if evaluation_profile in DIRECT_SMOKE_PROFILES:
         if (
             isinstance(budget["max_attempts"], bool)
@@ -559,8 +588,13 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         if evaluation_profile != SMOKE_PROFILE:
             if config["expected_sample_count"] != 5:
                 raise ContractError("direct challenger smoke requires expected_sample_count=5")
-            if budget["max_attempts"] != 10:
-                raise ContractError("direct challenger smoke requires max_attempts=10")
+            expected_smoke_attempts = config["expected_sample_count"] * (
+                1 + config["max_retries_per_sample"]
+            )
+            if budget["max_attempts"] != expected_smoke_attempts:
+                raise ContractError(
+                    "direct challenger smoke max_attempts must equal its retry ceiling"
+                )
     elif is_quality:
         expected_sample_count = config["expected_sample_count"]
         if (
@@ -606,7 +640,9 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             GPT54_MINI_SMOKE_PROFILE: 0.10,
             GEMINI35_FLASH_LITE_SMOKE_PROFILE: 0.10,
             GEMINI31_FLASH_LITE_SMOKE_PROFILE: 0.05,
-            GEMINI37_FLASH_SMOKE_PROFILE: 0.10,
+            GEMINI37_FLASH_SMOKE_PROFILE: (
+                0.05 if config["max_retries_per_sample"] == 0 else 0.10
+            ),
             CREWAI_SMOKE_PROFILE: 0.05,
             CREWAI_GEMINI35_FLASH_LITE_SMOKE_PROFILE: 0.10,
         }.get(evaluation_profile)
