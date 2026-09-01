@@ -834,6 +834,11 @@ def score_quality_run(
     ) or "brak"
     report_config = manifest.get("runtime_config", {})
     crewai_google = is_crewai and report_config.get("provider") == "google"
+    crewai_google_same_api = (
+        crewai_google
+        and isinstance(report_config.get("system_bundle_delta"), dict)
+        and report_config["system_bundle_delta"].get("same_provider_api") is True
+    )
     track_name = (
         "CrewAI Offline — Google Gemini"
         if crewai_google
@@ -853,6 +858,12 @@ def score_quality_run(
     )
     bundle_note = (
         " Tor CrewAI+Gemini zachowuje ten sam model ID, runner dataset, semantykę "
+        "schema, decision policy i natywne GenerateContent v1 co Gemini Direct. "
+        "Wire schema, osobne prompty ról/zadań, trzy role i frozen domain evidence "
+        "pozostają różne. Różnica jest `system_bundle_delta`, nie czystym wpływem "
+        "frameworka."
+        if crewai_google_same_api
+        else " Tor CrewAI+Gemini zachowuje ten sam model ID, runner dataset, semantykę "
         "schema i decision policy co Gemini Direct, ale używa GenerateContent v1 "
         "z innym wire schema, osobnych promptów ról/zadań, trzech ról i frozen "
         "domain evidence. Różnica jest `cross_api_system_bundle_delta`, nie czystym "

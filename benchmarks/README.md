@@ -1,5 +1,13 @@
 # Benchmark phishing — instrukcja operacyjna
 
+> **Aktualizacja 2026-09-01:** zatwierdzona rozbudowa do symetrycznej macierzy
+> GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini 3.7 — każdy jako Direct i
+> CrewAI, każdy ze smoke `n=5` i pilotem `n=30` — jest opisana w
+> [`FULL_MODEL_MATRIX_RUNBOOK.md`](FULL_MODEL_MATRIX_RUNBOOK.md). Ten runbook
+> zastępuje starsze rekomendacje z końca niniejszego dokumentu dotyczące
+> ograniczenia kolejnej serii do 1–2 adapterów. Historyczne wyniki poniżej
+> pozostają bez zmian i nie są przeznaczone do rerunu.
+
 ## Werdykt wobec specyfikacji z PDF
 
 Specyfikacja jest dobra jako przewodnik implementacyjny i zgadza się z normatywnym `BENCHMARK_SPEC.md`. Nie należy jednak zaczynać od 200 wiadomości ani traktować pięciu przykładów jako pomiaru jakości. Smoke `n=5` sprawdza przewód, a zamrożony pilot `n=30` daje pierwszy opisowy pomiar jakości w budżecie. Oba etapy mają status `ENGINEERING_PILOT` i żaden nie jest jeszcze rankingiem modeli.
@@ -17,6 +25,13 @@ Przed implementacją wprowadzono pięć korekt:
 Gotowe, wykonane i policzone jest siedem torów: bazowy OpenAI Direct, CrewAI Offline z OpenAI, OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`, Google Direct `gemini-3.5-flash-lite` i `gemini-3.1-flash-lite` oraz CrewAI Offline z natywnym Google `gemini-3.5-flash-lite`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Wykonany offline eksport `SEVEN_WAY_PILOT_030_001` obejmuje wszystkie siedem wariantów i nie nadpisuje wcześniejszych eksportów. Osobne `FIVE_DIRECT_PILOT_030_001` oraz `GEMINI35_DIRECT_VS_CREWAI_GEMINI_PILOT_030_001` rozdzielają porównanie modeli Direct od porównania całych system bundles.
 
 Oba smoke Gemini 3.7 są zachowanymi negatywnymi wynikami technicznymi. `SMOKE_001` zakończył 10/10 prób timeoutem po 45 s, a diagnostyczny `SMOKE_002` zakończył 5/5 prób timeoutem po 120 s mimo wyłączenia retry. W obu runach brak odpowiedzi i usage; łączna konserwatywna rezerwa nierozstrzygniętego kosztu to `0,124812 USD`. Tor Direct Gemini 3.7 przez synchroniczne stateless Interactions API jest zamknięty, a pilot zablokowany.
+
+Przygotowana 1 września 2026 rozbudowa nie zmienia tych historycznych wyników.
+Dodaje osobno wersjonowany Direct Gemini 3.7 przez natywne GenerateContent v1
+oraz brakujące pary CrewAI dla GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini
+3.7. Nowe smoke są gotowe do ręcznego live confirmation, a każdy nowy pilot
+pozostaje `LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny stan,
+budżet i komendy zawiera [`FULL_MODEL_MATRIX_RUNBOOK.md`](FULL_MODEL_MATRIX_RUNBOOK.md).
 
 Pierwszy live smoke CrewAI Offline + natywny Google `gemini-3.5-flash-lite` jest zachowanym `READINESS_FAIL`: cztery pierwsze calle zakończyły się `504 DEADLINE_EXCEEDED` przy lokalnym limicie 45 s, a piąty jawnym `503 UNAVAILABLE`. Osobny `SMOKE_002` z timeoutem 120 s i zero retry zakończył się `READINESS_PASS`: 5/5 wyników, 15/15 poprawnych calli, brak błędów i zdarzeń security, observed cost `0,0112299 USD`, mediana end-to-end `4469,763 ms`. Pilot `PILOT_030_002` zachował tę samą politykę i zakończył 30/30 workflow bez błędów, 90/90 calli, kosztem `0,0656925 USD` i medianą `4188,024 ms`. Oba zakończone campaign IDs oraz stary pilot 45 s są teraz programowo zablokowane przed rerunem.
 

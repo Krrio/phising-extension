@@ -14,6 +14,7 @@ from . import __version__
 from .contracts import (
     ContractError,
     GEMINI_INTERACTIONS_API_REVISION,
+    GEMINI_NATIVE_DIRECT_PROFILES,
     GEMINI_PROFILES,
     GPT54_PROFILES,
     QUALITY_PROFILES,
@@ -71,6 +72,10 @@ GEMINI_FATAL_PROTOCOL_ERRORS = {
 GEMINI_FATAL_PROVIDER_ERRORS = {
     "provider_http_error",
     "rate_limit",
+}
+GEMINI_NATIVE_STOP_ERRORS = GEMINI_FATAL_PROVIDER_ERRORS | {
+    "network_error",
+    "timeout",
 }
 
 
@@ -156,7 +161,9 @@ def readiness_report(
     max_retries = int(config["max_retries_per_sample"])
     projected_ceiling = round(sum(reservations) * (1 + max_retries), 10)
     evaluation_profile = config.get("evaluation_profile", "openai_direct_smoke_v1")
-    is_gemini = evaluation_profile in GEMINI_PROFILES
+    is_gemini_interactions = evaluation_profile in GEMINI_PROFILES
+    is_gemini_native = evaluation_profile in GEMINI_NATIVE_DIRECT_PROFILES
+    is_gemini = is_gemini_interactions or is_gemini_native
     required_cost_cap = (
         round(projected_ceiling * 1.2, 10)
         if evaluation_profile in QUALITY_PROFILES
@@ -171,6 +178,18 @@ def readiness_report(
     request_contract = (
         {
             "request_profile": config["request_profile"],
+            "provider_api": "native_generate_content_v1",
+            "instruction_role": "systemInstruction",
+            "token_limit_field": "generationConfig.maxOutputTokens",
+            "thinking_level": config["thinking_level"],
+            "seed": config["seed"],
+            "temperature": None,
+            "response_id_policy": "required",
+        }
+        if is_gemini_native
+        else
+        {
+            "request_profile": config["request_profile"],
             "api_revision": GEMINI_INTERACTIONS_API_REVISION,
             "instruction_role": "system_instruction",
             "token_limit_field": "generation_config.max_output_tokens",
@@ -181,7 +200,7 @@ def readiness_report(
                 "required_or_omitted_only_for_exact_complete_stateless_shape"
             ),
         }
-        if is_gemini
+        if is_gemini_interactions
         else {
             "request_profile": config.get(
                 "request_profile", "chat_completions_legacy_v1"
@@ -204,6 +223,19 @@ def readiness_report(
         {
             "store": False,
             "tools": "absent",
+            "provider_api": "native_generate_content_v1",
+            "conversation": "one_fresh_contents_request_per_sample",
+            "background": "absent",
+            "stream": "absent",
+            "provider_egress": "generativelanguage.googleapis.com_only",
+            "runtime_config_exposes_scoring_path": False,
+            "input_data_class": config["security"]["data_class"],
+        }
+        if is_gemini_native
+        else
+        {
+            "store": False,
+            "tools": "absent",
             "conversation": "absent",
             "previous_interaction_id": "absent",
             "background": False,
@@ -212,7 +244,7 @@ def readiness_report(
             "runtime_config_exposes_scoring_path": False,
             "input_data_class": config["security"]["data_class"],
         }
-        if is_gemini
+        if is_gemini_interactions
         else {
             "store": False,
             "tools": "absent",
@@ -482,6 +514,10 @@ def run_campaign(
             from .gemini_direct import GeminiInteractionsTransport
 
             transport = GeminiInteractionsTransport()
+        elif config.get("evaluation_profile") in GEMINI_NATIVE_DIRECT_PROFILES:
+            from .gemini_direct import GeminiGenerateContentTransport
+
+            transport = GeminiGenerateContentTransport()
         else:
             transport = OpenAIChatTransport()
     ensure_private_directory(output_root)
@@ -814,7 +850,8 @@ def run_campaign(
                     },
                 )
                 if (
-                    config.get("adapter") == "gemini_interactions"
+                    config.get("adapter")
+                    in {"gemini_interactions", "gemini_generate_content"}
                     and exc.kind in GEMINI_FATAL_PROTOCOL_ERRORS
                 ):
                     result["status"] = exc.kind
@@ -855,6 +892,9 @@ def run_campaign(
                         ),
                     }
                 elif (
+                    config.get("adapter") == "gemini_generate_content"
+                    and exc.kind in GEMINI_NATIVE_STOP_ERRORS
+                ) or (
                     config.get("adapter") == "gemini_interactions"
                     and exc.kind in GEMINI_FATAL_PROVIDER_ERRORS
                 ):

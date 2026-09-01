@@ -395,6 +395,7 @@ def build_benchmark_crew(
     profile: dict[str, Any],
     provider: str = "openai",
     thinking_level: str | None = None,
+    reasoning_effort: str | None = None,
     tls_context: ssl.SSLContext | None = None,
 ) -> BenchmarkCrewBundle:
     """Build one fresh, memoryless three-agent crew for one sample."""
@@ -438,7 +439,14 @@ def build_benchmark_crew(
 
     def make_llm(role: str, *, structured: bool) -> GuardedBenchmarkLLM:
         if provider == "google":
-            if temperature is not None or thinking_level != "minimal":
+            expected_thinking_level = (
+                "low" if model == "gemini-3.7-flash" else "minimal"
+            )
+            if (
+                temperature is not None
+                or thinking_level != expected_thinking_level
+                or reasoning_effort is not None
+            ):
                 raise ValueError("native Gemini benchmark generation profile drift")
             if tls_context is None:
                 raise ValueError("native Gemini benchmark requires a verified TLS context")
@@ -479,8 +487,11 @@ def build_benchmark_crew(
                 # GenerateContent request body.
                 extra_body={"store": False},
             )
+            thinking_enum = getattr(
+                types.ThinkingLevel, expected_thinking_level.upper()
+            )
             thinking_config = types.ThinkingConfig(
-                thinking_level=types.ThinkingLevel.MINIMAL,
+                thinking_level=thinking_enum,
                 include_thoughts=False,
             )
             delegate = LLM(
@@ -510,7 +521,7 @@ def build_benchmark_crew(
                     "api": "native_generate_content_v1",
                     "provider_max_attempts": 1,
                     "store": False,
-                    "thinking_level": "minimal",
+                    "thinking_level": expected_thinking_level,
                     "include_thoughts": False,
                     "use_vertexai": False,
                 },
@@ -518,16 +529,36 @@ def build_benchmark_crew(
 
         if provider != "openai":
             raise ValueError(f"unsupported benchmark provider: {provider}")
-        if temperature != 0 or thinking_level is not None or tls_context is not None:
+        is_gpt54 = model in {
+            "gpt-5.4-nano-2026-03-17",
+            "gpt-5.4-mini-2026-03-17",
+        }
+        expected_reasoning_effort = "none" if is_gpt54 else None
+        if (
+            temperature != 0
+            or thinking_level is not None
+            or reasoning_effort != expected_reasoning_effort
+            or tls_context is not None
+        ):
             raise ValueError("native OpenAI benchmark generation profile drift")
         # Send the exact frozen Direct schema instead of letting CrewAI add
         # Pydantic titles/descriptions that would change the comparison bundle.
         provider_params: dict[str, Any] = {"store": False}
+        if is_gpt54:
+            # CrewAI 1.15.8 recognizes reasoning_effort only for legacy o1 names.
+            # additional_params is merged into the real Chat Completions payload,
+            # so pin the supported GPT-5.4 value explicitly at the wire boundary.
+            provider_params["reasoning_effort"] = "none"
         if structured:
             # OpenAICompletion 1.15.8's typed ``response_format`` field rejects
             # a json_schema dict even though its request builder supports one.
             # additional_params is merged into the actual provider payload.
             provider_params["response_format"] = response_schema
+        token_limit_kwargs = (
+            {"max_completion_tokens": max_output_tokens}
+            if is_gpt54
+            else {"max_tokens": max_output_tokens}
+        )
         delegate = LLM(
             model=model,
             provider="openai",
@@ -535,14 +566,22 @@ def build_benchmark_crew(
             base_url="https://api.openai.com/v1",
             custom_openai=True,
             temperature=temperature,
-            max_tokens=max_output_tokens,
             timeout=request_timeout_seconds,
             stream=False,
             max_retries=0,
             store=False,
             api="completions",
             additional_params=provider_params,
+            **token_limit_kwargs,
         )
+        outer_params: dict[str, Any] = {"max_retries": 0, "store": False}
+        if is_gpt54:
+            outer_params.update(
+                {
+                    "reasoning_effort": "none",
+                    "token_limit_field": "max_completion_tokens",
+                }
+            )
         return GuardedBenchmarkLLM(
             call_budget=call_budget,
             benchmark_role=role,
@@ -555,7 +594,7 @@ def build_benchmark_crew(
             max_tokens=max_output_tokens,
             timeout=request_timeout_seconds,
             stream=False,
-            additional_params={"max_retries": 0, "store": False},
+            additional_params=outer_params,
         )
 
     domain_agent = _agent(
@@ -683,11 +722,17 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
         if llm.delegate.provider == "gemini":
             from google.genai import types
 
+            expected_thinking_level = (
+                "low" if llm.model == "gemini-3.7-flash" else "minimal"
+            )
+            expected_thinking_enum = getattr(
+                types.ThinkingLevel, expected_thinking_level.upper()
+            )
             expected_outer_params = {
                 "api": "native_generate_content_v1",
                 "provider_max_attempts": 1,
                 "store": False,
-                "thinking_level": "minimal",
+                "thinking_level": expected_thinking_level,
                 "include_thoughts": False,
                 "use_vertexai": False,
             }
@@ -755,14 +800,14 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                 or generation_config.tools is not None
                 or generation_config.thinking_config is None
                 or generation_config.thinking_config.thinking_level
-                != types.ThinkingLevel.MINIMAL
+                != expected_thinking_enum
                 or generation_config.thinking_config.include_thoughts is not False
                 or (generation_config.response_mime_type == "application/json")
                 is not structured
                 or (isinstance(wire_response_schema, dict)) is not structured
                 or generation_config.response_schema is not None
                 or not isinstance(thinking, types.ThinkingConfig)
-                or thinking.thinking_level != types.ThinkingLevel.MINIMAL
+                or thinking.thinking_level != expected_thinking_enum
                 or thinking.include_thoughts is not False
                 or not isinstance(http_options, types.HttpOptions)
                 or http_options.api_version != "v1"
@@ -835,7 +880,7 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                     "max_execution_time": agent.max_execution_time,
                     "max_tokens": llm.max_tokens,
                     "timeout": llm.timeout,
-                    "thinking_level": "minimal",
+                    "thinking_level": expected_thinking_level,
                     "include_thoughts": thinking.include_thoughts,
                     "wire_tools": "absent",
                     "response_schema_sha256": schema_sha256,
@@ -848,24 +893,60 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
             )
             continue
 
+        is_gpt54 = llm.model in {
+            "gpt-5.4-nano-2026-03-17",
+            "gpt-5.4-mini-2026-03-17",
+        }
+        expected_outer_params: dict[str, Any] = {
+            "max_retries": 0,
+            "store": False,
+        }
+        if is_gpt54:
+            expected_outer_params.update(
+                {
+                    "reasoning_effort": "none",
+                    "token_limit_field": "max_completion_tokens",
+                }
+            )
         delegate_params = getattr(llm.delegate, "additional_params", None)
+        prepared = llm.delegate._prepare_completion_params(
+            [{"role": "user", "content": "offline benchmark contract probe"}],
+            tools=[],
+        )
+        token_limit_matches = (
+            prepared.get("max_completion_tokens") == llm.max_tokens
+            and "max_tokens" not in prepared
+            and getattr(llm.delegate, "max_completion_tokens", None) == llm.max_tokens
+            and getattr(llm.delegate, "max_tokens", None) is None
+            and prepared.get("reasoning_effort") == "none"
+            if is_gpt54
+            else prepared.get("max_tokens") == llm.max_tokens
+            and "max_completion_tokens" not in prepared
+            and getattr(llm.delegate, "max_tokens", None) == llm.max_tokens
+            and "reasoning_effort" not in prepared
+        )
         if (
             llm.delegate.provider != "openai"
             or llm.provider != "openai"
             or llm.temperature != 0
             or llm.base_url != "https://api.openai.com/v1"
-            or llm.additional_params != {"max_retries": 0, "store": False}
+            or llm.additional_params != expected_outer_params
             or getattr(llm.delegate, "max_retries", None) != 0
             or getattr(llm.delegate, "store", None) is not False
             or getattr(llm.delegate, "api", None) != "completions"
             or getattr(llm.delegate, "custom_openai", None) is not True
             or llm.delegate.base_url != "https://api.openai.com/v1"
-            or llm.delegate.max_tokens != llm.max_tokens
             or llm.delegate.timeout != llm.timeout
             or not isinstance(delegate_params, dict)
+            or not token_limit_matches
+            or prepared.get("store") is not False
+            or prepared.get("model") != llm.model
+            or "tools" in prepared
         ):
             raise ValueError(f"effective CrewAI provider params drift: {expected_key}")
         expected_delegate_params: dict[str, Any] = {"store": False}
+        if is_gpt54:
+            expected_delegate_params["reasoning_effort"] = "none"
         if expected_key == "orchestrator":
             response_format = delegate_params.get("response_format")
             if (
@@ -891,6 +972,10 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                 "max_retry_limit": agent.max_retry_limit,
                 "max_execution_time": agent.max_execution_time,
                 "max_tokens": llm.max_tokens,
+                "token_limit_field": (
+                    "max_completion_tokens" if is_gpt54 else "max_tokens"
+                ),
+                "reasoning_effort": "none" if is_gpt54 else None,
                 "timeout": llm.timeout,
                 "response_format": (
                     "strict_json_schema" if expected_key == "orchestrator" else "text"

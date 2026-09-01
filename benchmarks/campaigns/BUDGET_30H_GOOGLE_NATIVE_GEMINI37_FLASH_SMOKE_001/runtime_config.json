@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "campaign_id": "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001",
+  "stage": "ENGINEERING_PILOT",
+  "provider": "google",
+  "adapter": "gemini_generate_content",
+  "endpoint": "https://generativelanguage.googleapis.com/v1/models/gemini-3.7-flash:generateContent",
+  "api_key_env": "GEMINI_API_KEY",
+  "evaluation_profile": "gemini_direct_native_gemini37_flash_smoke_v1",
+  "expected_sample_count": 5,
+  "config_id": "direct-native__google__gemini-3.7-flash__prompt-v1__thinking-low__smoke005__timeout120__transient-fail-fast__no-retry-v1",
+  "requested_model": "gemini-3.7-flash",
+  "request_profile": "gemini_generate_content_v1_structured_low_v1",
+  "thinking_level": "low",
+  "seed": 0,
+  "pricing_valid_through": "2026-12-31",
+  "dataset_path": "benchmarks/fixtures/openai_smoke_v1/runner_input.jsonl",
+  "prompt_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/direct_system_prompt_v1.txt",
+  "response_schema_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/response_schema.json",
+  "decision_policy_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/decision_policy.json",
+  "expected_asset_sha256": {
+    "dataset": "1645ea54eacfab59bf618354291f4353607ece23289b7fc952d9450e7ed3c435",
+    "prompt": "c321c4724bda853d38a80465fb537b210adc597979840fbca8c0dafbe23796c8",
+    "response_schema": "e0e2fbfc36bd14cf7e29aef12c9f6829732731cf72790f14a8b02699ececb420",
+    "decision_policy": "d8426b02b41576fe3cc38340ed88c8a63e4662707b6b7bb0343f3f41f5dffb15"
+  },
+  "temperature": null,
+  "max_output_tokens": 500,
+  "request_timeout_seconds": 120,
+  "max_retries_per_sample": 0,
+  "concurrency": 1,
+  "budget": {
+    "max_attempts": 5,
+    "max_cost_usd": 0.05,
+    "max_wall_seconds": 1800
+  },
+  "pricing_usd_per_million_tokens": {
+    "input": 0.75,
+    "cached_input": 0.075,
+    "output": 3.75,
+    "source_checked_at": "2026-09-01",
+    "source": "https://ai.google.dev/gemini-api/docs/pricing"
+  },
+  "security": {
+    "store": false,
+    "tools_enabled": false,
+    "external_processing_allowed": true,
+    "data_class": "synthetic_reserved_domains_only",
+    "stop_on_critical_event": true
+  }
+}

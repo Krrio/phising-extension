@@ -41,6 +41,18 @@ CREW_GEMINI_SMOKE_001_ID = (
 CREW_GEMINI_SMOKE_002_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002"
 )
+CREW_GEMINI31_SMOKE_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001"
+)
+CREW_GEMINI31_PILOT_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001"
+)
+CREW_GEMINI37_SMOKE_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001"
+)
+CREW_GEMINI37_PILOT_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001"
+)
 G37_PILOT_CONFIG = (
     BENCHMARKS_DIR / "campaigns" / G37_PILOT_ID / "runtime_config.json"
 )
@@ -79,7 +91,16 @@ class ClosedCampaignGuardTests(unittest.TestCase):
         )
         self.assertEqual(
             CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS,
-            frozenset({CREW_GEMINI_SMOKE_002_ID, CREW_GEMINI_PILOT_002_ID}),
+            frozenset(
+                {
+                    CREW_GEMINI_SMOKE_002_ID,
+                    CREW_GEMINI_PILOT_002_ID,
+                    CREW_GEMINI31_SMOKE_ID,
+                    CREW_GEMINI31_PILOT_ID,
+                    CREW_GEMINI37_SMOKE_ID,
+                    CREW_GEMINI37_PILOT_ID,
+                }
+            ),
         )
 
     def test_closed_direct_pilot_is_not_reported_ready_and_cannot_run(self) -> None:

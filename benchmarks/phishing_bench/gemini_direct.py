@@ -10,6 +10,7 @@ import urllib.request
 from typing import Any
 
 from .contracts import (
+    GEMINI_GENERATE_CONTENT_ENDPOINTS,
     GEMINI_INTERACTIONS_API_REVISION,
     GEMINI_INTERACTIONS_ENDPOINT,
     ContractError,
@@ -44,6 +45,7 @@ STATELESS_INTERACTION_KEYS_WITHOUT_ID = {
 KNOWN_TOP_LEVEL_RESPONSE_KEYS = {
     "background",
     "categories",
+    "candidates",
     "confidence",
     "created",
     "data",
@@ -51,17 +53,20 @@ KNOWN_TOP_LEVEL_RESPONSE_KEYS = {
     "id",
     "interaction",
     "model",
+    "modelVersion",
     "object",
     "outputs",
     "policyAssessment",
     "reasoning",
     "response",
+    "responseId",
     "result",
     "status",
     "steps",
     "trustScore",
     "updated",
     "usage",
+    "usageMetadata",
     "verdict",
 }
 
@@ -185,6 +190,44 @@ def _mapped_usage(data: dict[str, Any]) -> dict[str, int]:
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
         # Gemini bills visible output and thinking at the output-token rate.
+        "output_tokens": billed_output_tokens,
+        "reasoning_tokens": thought_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _mapped_generate_content_usage(data: dict[str, Any]) -> dict[str, int]:
+    usage_raw = data.get("usageMetadata")
+    if not isinstance(usage_raw, dict):
+        raise ProviderError(
+            "missing_usage",
+            "Gemini GenerateContent response did not contain usageMetadata",
+            retryable=False,
+        )
+    input_tokens = _required_token_count(usage_raw, "promptTokenCount")
+    visible_output_tokens = _required_token_count(
+        usage_raw, "candidatesTokenCount"
+    )
+    thought_tokens = _optional_token_count(usage_raw, "thoughtsTokenCount")
+    cached_input_tokens = _optional_token_count(
+        usage_raw, "cachedContentTokenCount"
+    )
+    total_tokens = _required_token_count(usage_raw, "totalTokenCount")
+    billed_output_tokens = visible_output_tokens + thought_tokens
+    if (
+        input_tokens <= 0
+        or visible_output_tokens <= 0
+        or cached_input_tokens > input_tokens
+        or total_tokens < input_tokens + billed_output_tokens
+    ):
+        raise ProviderError(
+            "missing_usage",
+            "Gemini GenerateContent token counts are internally inconsistent",
+            retryable=False,
+        )
+    return {
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
         "output_tokens": billed_output_tokens,
         "reasoning_tokens": thought_tokens,
         "total_tokens": total_tokens,
@@ -473,6 +516,258 @@ class GeminiInteractionsTransport:
             requested_model=requested_model,
             resolved_model=resolved_model,
             content=content,
+            finish_reason=finish_reason,
+            refusal=None,
+            tool_calls_present=tool_calls_present,
+            usage=usage,
+            safe_headers=headers,
+            elapsed_ms=elapsed_ms,
+            raw_response_sha256_material=raw,
+        )
+
+
+class GeminiGenerateContentTransport:
+    """One-call Direct transport for pinned native GenerateContent v1 models."""
+
+    def __init__(self) -> None:
+        tls_context = validated_tls_context()
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=tls_context),
+            _RejectRedirects(),
+        )
+
+    def call(
+        self,
+        *,
+        api_key: str,
+        endpoint: str,
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> ProviderResponse:
+        requested_model = next(
+            (
+                model
+                for model, allowed_endpoint in GEMINI_GENERATE_CONTENT_ENDPOINTS.items()
+                if endpoint == allowed_endpoint
+            ),
+            None,
+        )
+        if requested_model is None:
+            raise ContractError(
+                "transport rejected non-allowlisted Gemini GenerateContent endpoint"
+            )
+        if body.get("store") is not False or "tools" in body:
+            raise ContractError("GenerateContent transport requires store=false and no tools")
+
+        encoded_body = json.dumps(
+            body,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint,
+            data=encoded_body,
+            method="POST",
+            headers={
+                "x-goog-api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "phishing-extension-benchmark/0.1",
+            },
+        )
+        started = time.monotonic()
+        response_status: int | None = None
+        try:
+            with self._opener.open(request, timeout=timeout_seconds) as response:
+                raw = _read_limited(response)
+                headers = _safe_headers(response.headers)
+                status_value = getattr(response, "status", None)
+                if isinstance(status_value, int) and not isinstance(status_value, bool):
+                    response_status = status_value
+        except urllib.error.HTTPError as exc:
+            _read_limited(exc)
+            status_code = int(exc.code)
+            retryable = status_code in {408, 429} or 500 <= status_code <= 599
+            kind = (
+                "timeout"
+                if status_code == 408
+                else "rate_limit"
+                if status_code == 429
+                else "provider_http_error"
+            )
+            raise ProviderError(
+                kind,
+                f"Gemini returned HTTP {status_code}",
+                status_code=status_code,
+                retryable=retryable,
+                retry_after_seconds=_retry_after(exc.headers),
+                response_headers=_safe_headers(exc.headers),
+            ) from None
+        except (TimeoutError, socket.timeout) as exc:
+            raise ProviderError(
+                "timeout",
+                "Gemini GenerateContent request timed out",
+                retryable=True,
+            ) from exc
+        except urllib.error.URLError as exc:
+            reason = exc.reason
+            if isinstance(reason, (TimeoutError, socket.timeout)):
+                raise ProviderError(
+                    "timeout",
+                    "Gemini GenerateContent request timed out",
+                    retryable=True,
+                ) from exc
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                verify_code = getattr(reason, "verify_code", None)
+                code_suffix = (
+                    f" (verify_code={verify_code})"
+                    if verify_code is not None
+                    else ""
+                )
+                raise ProviderError(
+                    "tls_certificate_error",
+                    "TLS certificate verification failed"
+                    + code_suffix
+                    + "; repair the Python CA trust store; never disable verification",
+                    retryable=False,
+                ) from exc
+            raise ProviderError(
+                "network_error",
+                sanitize_text("Gemini network request failed", (api_key,)),
+                retryable=True,
+            ) from exc
+
+        elapsed_ms = (time.monotonic() - started) * 1000
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ProviderError(
+                "invalid_provider_json",
+                "Gemini GenerateContent returned invalid JSON",
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            ) from exc
+        if not isinstance(data, dict):
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini GenerateContent response is not an object",
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+
+        response_id = data.get("responseId")
+        resolved_model = data.get("modelVersion")
+        candidates = data.get("candidates")
+        if not isinstance(response_id, str) or not response_id:
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini GenerateContent responseId is missing or invalid; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+        if not isinstance(resolved_model, str) or not resolved_model:
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini GenerateContent modelVersion is missing or invalid; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+        if (
+            not isinstance(candidates, list)
+            or len(candidates) != 1
+            or not isinstance(candidates[0], dict)
+        ):
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini GenerateContent requires exactly one candidate; "
+                + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+
+        candidate = candidates[0]
+        finish_reason_raw = candidate.get("finishReason")
+        content = candidate.get("content")
+        if not isinstance(finish_reason_raw, str) or not finish_reason_raw:
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini candidate finishReason is missing or invalid",
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+        if not isinstance(content, dict) or not isinstance(content.get("parts"), list):
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini candidate content.parts is missing or invalid",
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+        if content.get("role") not in {None, "model"}:
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini candidate content role is invalid",
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+
+        text_parts: list[str] = []
+        tool_calls_present = False
+        for part in content["parts"]:
+            if not isinstance(part, dict):
+                raise ProviderError(
+                    "invalid_provider_response",
+                    "Gemini candidate contains an invalid part",
+                    status_code=response_status,
+                    retryable=False,
+                    response_headers=headers,
+                )
+            tool_calls_present = tool_calls_present or any(
+                key in part for key in ("functionCall", "functionResponse", "executableCode")
+            )
+            if part.get("thought") is True:
+                continue
+            text_value = part.get("text")
+            if isinstance(text_value, str):
+                text_parts.append(text_value)
+        response_text = "".join(text_parts)
+        if not response_text and not tool_calls_present:
+            raise ProviderError(
+                "invalid_provider_response",
+                "Gemini GenerateContent response contains no visible text",
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            )
+        try:
+            usage = _mapped_generate_content_usage(data)
+        except ProviderError as exc:
+            raise ProviderError(
+                exc.kind,
+                str(exc) + "; " + _safe_top_level_shape(data),
+                status_code=response_status,
+                retryable=False,
+                response_headers=headers,
+            ) from exc
+        finish_reason = {
+            "STOP": "stop",
+            "MAX_TOKENS": "length",
+        }.get(finish_reason_raw, finish_reason_raw.casefold())
+        return ProviderResponse(
+            response_id=response_id,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
+            content=response_text,
             finish_reason=finish_reason,
             refusal=None,
             tool_calls_present=tool_calls_present,

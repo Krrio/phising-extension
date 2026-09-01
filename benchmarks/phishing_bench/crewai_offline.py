@@ -393,6 +393,7 @@ def crewai_runtime_preflight(
             profile=assets["crew_profile"],
             provider=provider,
             thinking_level=config.get("thinking_level"),
+            reasoning_effort=config.get("reasoning_effort"),
             tls_context=(validated_tls_context() if provider == "google" else None),
         )
         try:
@@ -715,6 +716,7 @@ def _execute_real_workflow(
             profile=assets["crew_profile"],
             provider=provider,
             thinking_level=config.get("thinking_level"),
+            reasoning_effort=config.get("reasoning_effort"),
             tls_context=(validated_tls_context() if provider == "google" else None),
         )
         audit = audit_crew(bundle)

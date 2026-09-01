@@ -631,7 +631,10 @@ def score_run(
     valid_schema_count = sum(bool(result.get("response_schema_valid")) for result in results)
     attempts = sum(int(result.get("outbound_attempts", 0)) for result in results)
     is_crewai = runtime_config.get("adapter") == "crewai_sequential_offline"
-    is_gemini = runtime_config.get("adapter") == "gemini_interactions"
+    is_gemini = runtime_config.get("adapter") in {
+        "gemini_interactions",
+        "gemini_generate_content",
+    }
     retry_attempts = (
         0
         if is_crewai
@@ -842,6 +845,11 @@ def score_run(
         else ""
     )
     crewai_google = is_crewai and runtime_config.get("provider") == "google"
+    crewai_google_same_api = (
+        crewai_google
+        and isinstance(runtime_config.get("system_bundle_delta"), dict)
+        and runtime_config["system_bundle_delta"].get("same_provider_api") is True
+    )
     report_title = (
         "Raport CrewAI Offline + Google Gemini smoke"
         if crewai_google
@@ -862,6 +870,11 @@ def score_run(
     )
     track_note = (
         " To jest pomiar całego bundle CrewAI+Gemini: ten sam model ID, dataset, "
+        "semantyka schema, decision policy i natywne GenerateContent v1 co Direct. "
+        "Wire schema, prompty, trzy role i frozen evidence pozostają różne. Jest "
+        "to `system_bundle_delta`, nie czysta delta frameworka."
+        if crewai_google_same_api
+        else " To jest pomiar całego bundle CrewAI+Gemini: ten sam model ID, dataset, "
         "semantyka schema i decision policy co Direct, ale GenerateContent v1 ma "
         "inne wire schema; dochodzą osobne prompty, trzy role i frozen evidence. "
         "Jest to `cross_api_system_bundle_delta`, nie czysta delta frameworka."
