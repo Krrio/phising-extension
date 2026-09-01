@@ -36,8 +36,12 @@ from phishing_bench.runner import readiness_report, run_campaign  # noqa: E402
 from phishing_bench.scoring import score_run  # noqa: E402
 
 
-SMOKE_ID = "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001"
+CLOSED_SMOKE_ID = "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001"
+SMOKE_ID = "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"
 PILOT_ID = "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001"
+CLOSED_SMOKE_CONFIG = (
+    BENCHMARKS_DIR / "campaigns" / CLOSED_SMOKE_ID / "runtime_config.json"
+)
 SMOKE_CONFIG = BENCHMARKS_DIR / "campaigns" / SMOKE_ID / "runtime_config.json"
 PILOT_CONFIG = BENCHMARKS_DIR / "campaigns" / PILOT_ID / "runtime_config.json"
 CREW_SMOKE_CONFIG = (
@@ -178,6 +182,9 @@ class FakeNativeTransport:
 
 class GeminiNativeDirectContractTests(unittest.TestCase):
     def test_smoke_and_pilot_freeze_matching_direct_assets(self) -> None:
+        closed_smoke, closed_smoke_assets = load_and_validate_campaign(
+            CLOSED_SMOKE_CONFIG, REPO_ROOT
+        )
         smoke, smoke_assets = load_and_validate_campaign(SMOKE_CONFIG, REPO_ROOT)
         pilot, pilot_assets = load_and_validate_campaign(PILOT_CONFIG, REPO_ROOT)
         crew, crew_assets = load_and_validate_campaign(CREW_SMOKE_CONFIG, REPO_ROOT)
@@ -199,6 +206,14 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
         self.assertEqual(smoke["request_timeout_seconds"], 120)
         self.assertEqual(pilot["request_timeout_seconds"], 120)
         self.assertEqual(smoke_assets["dataset"], crew_assets["dataset"])
+        self.assertEqual(closed_smoke_assets["dataset"], smoke_assets["dataset"])
+        self.assertEqual(closed_smoke_assets["prompt"], smoke_assets["prompt"])
+        self.assertEqual(
+            closed_smoke_assets["response_schema"], smoke_assets["response_schema"]
+        )
+        self.assertEqual(
+            closed_smoke_assets["decision_policy"], smoke_assets["decision_policy"]
+        )
         self.assertEqual(
             smoke_assets["response_schema"], crew_assets["response_schema"]
         )
@@ -207,19 +222,27 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
         )
         self.assertEqual(len(pilot_assets["dataset"]), 30)
 
+        self.assertIn("HTTP 503", campaign_live_block_reason(closed_smoke) or "")
         self.assertIsNone(campaign_live_block_reason(smoke))
         self.assertIn("prerequisite", campaign_live_block_reason(pilot) or "")
         self.assertIn(
             SMOKE_ID, read_json(SMOKE_MANIFEST)["compatible_campaign_ids"]
         )
         self.assertIn(
+            CLOSED_SMOKE_ID,
+            read_json(SMOKE_MANIFEST)["compatible_campaign_ids"],
+        )
+        self.assertIn(
             PILOT_ID, read_json(PILOT_MANIFEST)["compatible_campaign_ids"]
         )
 
     def test_readiness_exposes_native_contract_and_blocks_only_pilot(self) -> None:
+        closed_smoke_report = readiness_report(CLOSED_SMOKE_CONFIG, REPO_ROOT)
         smoke_report = readiness_report(SMOKE_CONFIG, REPO_ROOT)
         pilot_report = readiness_report(PILOT_CONFIG, REPO_ROOT)
 
+        self.assertEqual(closed_smoke_report["status"], "LIVE_BLOCKED")
+        self.assertIn("HTTP 503", closed_smoke_report["live_block_reason"])
         self.assertEqual(
             smoke_report["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
         )

@@ -89,7 +89,7 @@ MATRIX = {
             CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
         ),
         "direct": (
-            config("BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001"),
+            config("BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"),
             config("BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001"),
         ),
         "crew": (

@@ -109,6 +109,9 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_001/` | zachowany `READINESS_FAIL`: 10 timeoutów po 45 s; nie uruchamiać ponownie |
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_002/` | zachowany `READINESS_FAIL`: 5 timeoutów po 120 s, zero retry, usage nieznane; nie uruchamiać ponownie |
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001/` | zablokowany po dwóch negatywnych smoke; nie uruchamiać |
+| `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001/` | zachowany `READINESS_FAIL`: pierwszy request GenerateContent zwrócił HTTP 503, a fail-fast zatrzymał pozostałe cztery próbki; nie uruchamiać ponownie |
+| `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002/` | identyczny audytowalny smoke GenerateContent po przejściowej awarii dostępności `_001`; aktywny do jednej ręcznie potwierdzonej próby |
+| `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001/` | pilot n=30 zablokowany do audytowanego `READINESS_PASS` smoke `_002` |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5 calli pierwszej roli, 4 × 504 i 1 × 503, bez retry; nie uruchamiać ponownie |
@@ -117,7 +120,7 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, 90 calli, koszt `0,0656925 USD`; programowo `LIVE_BLOCKED` |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
-| `phishing_bench/gemini_direct.py` | bezpośredni transport Gemini Interactions z izolacją sieci, jawną oczekiwaną rewizją schematu, limitem odpowiedzi i bezpiecznym parsowaniem usage |
+| `phishing_bench/gemini_direct.py` | bezpośrednie transporty Gemini Interactions i natywnego GenerateContent z izolacją sieci, jawnymi kontraktami, limitem odpowiedzi i bezpiecznym parsowaniem usage |
 | `phishing_bench/comparison.py` | offline integrity gate i eksport wielu modeli/silników do CSV/JSON/Markdown |
 | `phishing_bench/` | transport, kontrakty, ledger, runner i scorer |
 | `tests/test_benchmark.py` | deterministyczne testy bez API i bez kosztu |

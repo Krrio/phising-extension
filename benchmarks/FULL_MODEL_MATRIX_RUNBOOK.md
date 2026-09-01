@@ -72,10 +72,20 @@ CrewAI.
 | CrewAI + Gemini 3.7 | 15 / 0,25 USD | 90 / 1,00 USD | 0,831391 USD |
 | **Łącznie** | **65 / 0,75 USD** | **390 / 3,65 USD** | **2,509897 USD** |
 
+Pierwsza natywna próba
+`BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001__20260901T160523Z__0841f81d`
+została zamknięta po jednym `HTTP 503`; fail-fast nie wysłał pozostałych
+czterech requestów. Nie uzyskano usage ani wyniku jakości, a ledger zachował
+konserwatywną rezerwę `0,008313 USD`. Tabela opisuje pozostały plan od osobno
+zamrożonego `_SMOKE_002`. Po doliczeniu tej zakończonej, nieznanej kosztowo
+próby łączna konserwatywna rezerwa całej serii wynosi `2,518210 USD`.
+
 Hard cap to awaryjny sufit, a nie prognoza rachunku. Konserwatywna rezerwa
 zakłada skrajnie niekorzystny token count i maksymalny output każdego calla;
 observed cost z usage i billing providera są właściwym wynikiem kosztowym.
-Łączny twardy sufit nowych kampanii wynosi 4,40 USD.
+Pozostały twardy sufit aktywnych kampanii wynosi 4,40 USD. Suma skonfigurowanych
+ceilingów wraz z zamkniętym `_SMOKE_001` wynosi 4,45 USD, ale ten run zatrzymał
+się po jednym z pięciu dopuszczonych requestów.
 
 Każdy pilot ma tylko 30 wiadomości na ramię. Dla pojedynczego modelu komplet
 Direct + CrewAI to 60 ocenianych wiadomości; CrewAI generuje więcej calli, bo
@@ -87,7 +97,7 @@ nowych smoke i pilotów sumują się do 12,5 godziny, więc mieszczą się w lim
 
 | Tor | Smoke campaign ID | Pilot campaign ID |
 |---|---|---|
-| Gemini 3.7 Native Direct | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001` | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001` |
+| Gemini 3.7 Native Direct | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002` | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001` |
 | CrewAI + GPT-5.4 Nano | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001` |
 | CrewAI + GPT-5.4 Mini | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001` |
 | CrewAI + Gemini 3.1 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001` |
@@ -109,10 +119,10 @@ env -u OPENAI_API_KEY -u GEMINI_API_KEY PYTHONWARNINGS=ignore \
   backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -q
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
-  --campaign benchmarks/campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002/runtime_config.json
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign benchmarks/campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002/runtime_config.json
 ```
 
 Ostatnia komenda jest dry-runem. Bez `--live` nie wykonuje requestu.
@@ -124,7 +134,7 @@ nie zwrócił odpowiedzi nawet przy 120 sekundach. Wczytaj klucz bez wyświetlan
 go i wykonaj dokładnie jeden campaign ID:
 
 ```bash
-CAMPAIGN_ID="BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001"
+CAMPAIGN_ID="BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"
 CONFIG="benchmarks/campaigns/$CAMPAIGN_ID/runtime_config.json"
 
 read -s GEMINI_API_KEY

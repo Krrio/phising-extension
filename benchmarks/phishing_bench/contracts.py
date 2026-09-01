@@ -87,6 +87,15 @@ GEMINI37_NATIVE_VARIANTS = {
         0.05,
         1800,
     ),
+    "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002": (
+        GEMINI37_NATIVE_SMOKE_PROFILE,
+        "direct-native__google__gemini-3.7-flash__prompt-v1__thinking-low__smoke005__timeout120__transient-fail-fast__no-retry__availability-rerun-v2",
+        120,
+        0,
+        5,
+        0.05,
+        1800,
+    ),
     "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001": (
         GEMINI37_NATIVE_QUALITY_PILOT_PROFILE,
         "direct-native__google__gemini-3.7-flash__prompt-v1__thinking-low__pilot030__timeout120__transient-fail-fast__no-retry-v1",
@@ -248,8 +257,13 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "closed after both prerequisite Gemini 3.7 smoke campaigns failed "
         "technically"
     ),
+    "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001": (
+        "closed after the recorded native GenerateContent run returned HTTP "
+        "503 on its first request and the transient fail-fast policy stopped "
+        "the remaining four samples; use the separately frozen SMOKE_002"
+    ),
     "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001": (
-        "prerequisite Direct native Gemini 3.7 SMOKE_001 has not yet produced "
+        "prerequisite Direct native Gemini 3.7 SMOKE_002 has not yet produced "
         "an audited READINESS_PASS"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001": (
