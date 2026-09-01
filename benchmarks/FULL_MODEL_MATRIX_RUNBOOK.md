@@ -18,10 +18,10 @@ zamrożonego Direct przez natywne GenerateContent v1.
 
 | Model | Direct `n=5 → n=30` | CrewAI `n=5 → n=30` |
 |---|---|---|
-| GPT-5.4 Nano | wykonane: `READINESS_PASS → PILOT_HOLD` | smoke gotowy; pilot zablokowany do przejścia smoke |
+| GPT-5.4 Nano | wykonane: `READINESS_PASS → PILOT_HOLD` | `_SMOKE_001` nieważny przez błędny klucz; `_SMOKE_002` gotowy; pilot zablokowany |
 | GPT-5.4 Mini | wykonane: `READINESS_PASS → PILOT_HOLD` | smoke gotowy; pilot zablokowany do przejścia smoke |
 | Gemini 3.1 Flash-Lite | wykonane: `READINESS_PASS → PILOT_HOLD` | smoke gotowy; pilot zablokowany do przejścia smoke |
-| Gemini 3.7 Flash | dwa smoke Interactions zachowane jako `READINESS_FAIL`; nowy native Direct smoke gotowy, pilot zablokowany | smoke gotowy; pilot zablokowany do przejścia smoke |
+| Gemini 3.7 Flash | native Direct wykonany: `READINESS_PASS → PILOT_HOLD` (29/30 success) | smoke gotowy; pilot zablokowany do przejścia smoke |
 
 Gemini 3.5 Flash-Lite ma już wykonane oba tory Direct i CrewAI, więc nie jest
 częścią nowych płatnych prób.
@@ -94,13 +94,21 @@ usage. Opisowa confusion matrix po zastosowaniu zamrożonej akcji awaryjnej to
 `9903,467 ms`. Po zastąpieniu rezerwy pilota kosztem zaobserwowanym łączny znany
 lub konserwatywnie zarezerwowany koszt całej serii wynosi `2,31591325 USD`.
 
+Pierwszy smoke CrewAI + GPT-5.4 Nano użył omyłkowo klucza Gemini i zakończył
+się pięcioma odpowiedziami `401 invalid_api_key` przed wykonaniem modelu. Nie
+jest to wynik GPT ani CrewAI. Observed usage i koszt wynoszą zero, lecz przy
+braku usage ledger zachowuje rezerwę `0,0335568 USD`. Identyczny `_SMOKE_002`
+pozostaje w planie z własną rezerwą, dlatego łączny znany lub konserwatywnie
+zarezerwowany koszt serii wynosi teraz `2,34947005 USD`.
+
 Hard cap to awaryjny sufit, a nie prognoza rachunku. Konserwatywna rezerwa
 zakłada skrajnie niekorzystny token count i maksymalny output każdego calla;
 observed cost z usage i billing providera są właściwym wynikiem kosztowym.
 Pozostały twardy sufit aktywnych kampanii wynosi 3,70 USD. Suma skonfigurowanych
-ceilingów wraz z zamkniętym `_SMOKE_001`, zakończonym `_SMOKE_002` i pilotem
-wynosi 4,45 USD, ale faktyczny koszt dwóch zakończonych kampanii z kompletnym
-usage to `0,085005 USD`; `_SMOKE_001` zachowuje osobną rezerwę `0,008313 USD`.
+ceilingów wraz z zakończonymi kampaniami i nieważnym smoke Nano `_001` wynosi
+4,55 USD. Faktyczny koszt dwóch zakończonych kampanii Gemini z kompletnym usage
+to `0,085005 USD`; nieudane próby bez usage zachowują osobne rezerwy:
+`0,008313 USD` dla Gemini 3.7 i `0,0335568 USD` dla Nano CrewAI.
 
 Każdy pilot ma tylko 30 wiadomości na ramię. Dla pojedynczego modelu komplet
 Direct + CrewAI to 60 ocenianych wiadomości; CrewAI generuje więcej calli, bo
@@ -113,16 +121,16 @@ nowych smoke i pilotów sumują się do 12,5 godziny, więc mieszczą się w lim
 | Tor | Smoke campaign ID | Pilot campaign ID |
 |---|---|---|
 | Gemini 3.7 Native Direct | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002` | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001` |
-| CrewAI + GPT-5.4 Nano | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001` |
+| CrewAI + GPT-5.4 Nano | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002` | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001` |
 | CrewAI + GPT-5.4 Mini | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001` |
 | CrewAI + Gemini 3.1 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001` |
 | CrewAI + Gemini 3.7 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001` |
 
 Gemini 3.7 Native Direct smoke `_002` i pilot są zakończone oraz zamknięte przed
-ponowieniem. Cztery smoke CrewAI są gotowe do ręcznie potwierdzonego live runu,
-a ich piloty mają programowy status `LIVE_BLOCKED`, dopóki własny smoke nie
-uzyska audytowanego `READINESS_PASS`. Dzięki temu literówka nie uruchomi 90
-płatnych calli przed sprawdzeniem przewodu.
+ponowieniem. Nano CrewAI `_SMOKE_001` jest również zamknięty jako nieważna próba
+uwierzytelnienia; aktywny jest identyczny `_SMOKE_002`. Cztery aktywne smoke
+CrewAI są gotowe do ręcznie potwierdzonego live runu, a ich piloty mają status
+`LIVE_BLOCKED`, dopóki własny smoke nie uzyska audytowanego `READINESS_PASS`.
 
 ## Etap 0 — czysty commit i kontrola bez kosztu
 
@@ -135,10 +143,10 @@ env -u OPENAI_API_KEY -u GEMINI_API_KEY PYTHONWARNINGS=ignore \
   backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -q
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
-  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/runtime_config.json
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/runtime_config.json
 ```
 
 Ostatnia komenda jest dry-runem. Bez `--live` nie wykonuje requestu.
@@ -149,8 +157,12 @@ Gemini 3.7 Native Direct jest już zakończony; nie uruchamiaj ponownie jego smo
 ani pilota. Następny aktywny smoke to CrewAI + GPT-5.4 Nano. Wczytaj klucz bez
 wyświetlania go i wykonaj dokładnie jeden campaign ID:
 
+Harness odrzuci przed requestem oczywistą zamianę kluczy (`AIza…` jako OpenAI
+albo `sk-…` jako Gemini), ale operator nadal odpowiada za użycie właściwego,
+aktywnego klucza i jego rotację po ekspozycji.
+
 ```bash
-CAMPAIGN_ID="BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001"
+CAMPAIGN_ID="BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002"
 CONFIG="benchmarks/campaigns/$CAMPAIGN_ID/runtime_config.json"
 
 read -s OPENAI_API_KEY

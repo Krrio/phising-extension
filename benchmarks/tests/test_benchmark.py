@@ -24,6 +24,7 @@ sys.path.insert(0, str(BENCHMARKS_DIR))
 from phishing_bench.contracts import (  # noqa: E402
     ContractError,
     action_for_output,
+    assert_api_key_provider_compatible,
     build_chat_request,
     build_user_message,
     load_and_validate_campaign,
@@ -289,6 +290,46 @@ class BenchmarkContractTests(unittest.TestCase):
         sanitized = sanitize_text(f"Authorization: Bearer {FAKE_KEY}; key={FAKE_KEY}", (FAKE_KEY,))
         self.assertNotIn(FAKE_KEY, sanitized)
         self.assertIn("[REDACTED_SECRET]", sanitized)
+
+        masked_provider_echo = (
+            "Incorrect API key provided: ZZ.synthetic"
+            + "*" * 32
+            + "tail"
+        )
+        sanitized_echo = sanitize_text(masked_provider_echo)
+        self.assertNotIn("ZZ.synthetic", sanitized_echo)
+        self.assertNotIn("tail", sanitized_echo)
+        self.assertIn("[REDACTED_SECRET]", sanitized_echo)
+
+    def test_unmistakable_cross_provider_api_keys_are_rejected_without_echo(self) -> None:
+        cases = (
+            (
+                {"provider": "openai", "api_key_env": "OPENAI_API_KEY"},
+                "AIza" + "G" * 32,
+                "Google API key",
+            ),
+            (
+                {"provider": "google", "api_key_env": "GEMINI_API_KEY"},
+                "sk-" + "O" * 32,
+                "OpenAI API key",
+            ),
+        )
+        for config_value, wrong_key, expected_message in cases:
+            with self.subTest(provider=config_value["provider"]):
+                with self.assertRaises(ContractError) as raised:
+                    assert_api_key_provider_compatible(config_value, wrong_key)
+                self.assertIn(expected_message, str(raised.exception))
+                self.assertIn("no provider request was made", str(raised.exception))
+                self.assertNotIn(wrong_key, str(raised.exception))
+
+        assert_api_key_provider_compatible(
+            {"provider": "openai", "api_key_env": "OPENAI_API_KEY"},
+            "sk-" + "A" * 32,
+        )
+        assert_api_key_provider_compatible(
+            {"provider": "google", "api_key_env": "GEMINI_API_KEY"},
+            "AIza" + "B" * 32,
+        )
 
     def test_retry_after_and_provider_error_summary_are_bounded_and_non_raw(self) -> None:
         self.assertEqual(_retry_after({"Retry-After": "12.5"}), 12.5)

@@ -51,7 +51,7 @@ MATRIX = {
             config("BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001"),
         ),
         "crew": (
-            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001"),
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002"),
             config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001"),
         ),
     },
@@ -101,6 +101,20 @@ MATRIX = {
 
 
 class FullCrewAIModelMatrixContractTests(unittest.TestCase):
+    def test_nano_auth_retry_changes_only_campaign_and_config_ids(self) -> None:
+        failed_auth = read_json(
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001")
+        )
+        corrected_auth = read_json(
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002")
+        )
+
+        for value in (failed_auth, corrected_auth):
+            value.pop("campaign_id")
+            value.pop("config_id")
+
+        self.assertEqual(corrected_auth, failed_auth)
+
     def test_every_model_has_matching_direct_and_crewai_smoke_and_pilot_assets(self) -> None:
         framework_profiles = []
         for name, row in MATRIX.items():

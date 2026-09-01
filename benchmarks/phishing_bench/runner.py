@@ -19,6 +19,7 @@ from .contracts import (
     GPT54_PROFILES,
     QUALITY_PROFILES,
     action_for_output,
+    assert_api_key_provider_compatible,
     assert_campaign_live_allowed,
     assert_pricing_current_for_run,
     build_chat_request,
@@ -503,6 +504,7 @@ def run_campaign(
     )
     if not api_key.strip():
         raise ContractError(f"{config['api_key_env']} is empty")
+    assert_api_key_provider_compatible(config, api_key)
     if os.environ.get("SSLKEYLOGFILE"):
         raise ContractError("unset SSLKEYLOGFILE before live run; TLS key logging is forbidden")
     if store_reasoning and config["security"]["data_class"] != "synthetic_reserved_domains_only":
@@ -993,4 +995,6 @@ def run_campaign(
 
 def api_key_from_environment(config_path: Path, repo_root: Path) -> str:
     config, _ = load_and_validate_campaign(config_path, repo_root)
-    return os.environ.get(config["api_key_env"], "")
+    api_key = os.environ.get(config["api_key_env"], "")
+    assert_api_key_provider_compatible(config, api_key)
+    return api_key

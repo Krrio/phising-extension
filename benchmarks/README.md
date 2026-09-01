@@ -30,9 +30,13 @@ Przygotowana 1 września 2026 rozbudowa nie zmienia tych historycznych wyników.
 Dodaje osobno wersjonowany Direct Gemini 3.7 przez natywne GenerateContent v1
 oraz brakujące pary CrewAI dla GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini
 3.7. Natywny Direct Gemini 3.7 zakończył smoke `_002` i pilot n=30; oba ID są
-zamknięte przed ponowieniem. Pozostałe nowe smoke CrewAI są gotowe, a ich
-piloty pozostają `LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny
-stan, budżet i komendy zawiera
+zamknięte przed ponowieniem. Pierwszy smoke CrewAI + GPT-5.4 Nano (`_001`)
+zakończył się pięcioma błędami `401`, ponieważ do zmiennej `OPENAI_API_KEY`
+omyłkowo wczytano klucz Gemini. Nie jest to wynik modelu ani frameworka;
+kampania jest zamknięta, a identyczny, osobno wersjonowany `_002` czeka na
+prawidłowy klucz OpenAI. Pozostałe nowe smoke CrewAI są gotowe, a ich piloty
+pozostają `LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny stan,
+budżet i komendy zawiera
 [`FULL_MODEL_MATRIX_RUNBOOK.md`](FULL_MODEL_MATRIX_RUNBOOK.md).
 
 Pilot natywnego Direct Gemini 3.7 zakończył 30/30 rekordów i 30 attempts bez
@@ -130,6 +134,8 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli, zero retry i błędów, koszt `0,0112299 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001/` | pierwotny pilot 45 s; programowo `LIVE_BLOCKED`, nie uruchamiać |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, 90 calli, koszt `0,0656925 USD`; programowo `LIVE_BLOCKED` |
+| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5/5 błędów uwierzytelnienia po użyciu klucza Gemini wobec OpenAI, bez wyniku modelu; nie uruchamiać ponownie |
+| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/` | identyczny, osobno zamrożony retry po korekcie uwierzytelnienia; wymaga prawidłowego `OPENAI_API_KEY` |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
 | `phishing_bench/gemini_direct.py` | bezpośrednie transporty Gemini Interactions i natywnego GenerateContent z izolacją sieci, jawnymi kontraktami, limitem odpowiedzi i bezpiecznym parsowaniem usage |
@@ -146,6 +152,12 @@ Najważniejsze pliki:
 | `tests/test_crewai_gemini.py` | natywne GenerateContent v1, `store=false`, TLS/proxy/Vertex, call ceiling, cleanup, usage i pełny mockowany pilot CrewAI+Gemini |
 
 Adaptery Direct używają wyłącznie biblioteki standardowej Pythona i nie mają niewidocznych retry SDK. Każdy ma osobną dokładną allowlistę egressu: OpenAI tylko `api.openai.com`, a Gemini tylko `generativelanguage.googleapis.com`. Oba ignorują proxy, nie pobierają URL-i z wiadomości i odmawiają live runu przy aktywnym `SSLKEYLOGFILE`. Tor CrewAI działa w przypiętym środowisku backendu (`crewai==1.15.8`); OpenAI używa Chat Completions, a Google przypiętego `google-genai==1.65.0` i natywnego GenerateContent v1. Oba wymuszają trzy calls, zero retry, brak narzędzi agentów, `store=false`, wyłączoną telemetrię i dokładny egress. Google dodatkowo czyści ambient Vertex/Google Cloud, wymusza HTTPX bez proxy/redirectów i sprawdza rzeczywisty root request body z `store=false`.
+
+Przed importem CrewAI i przed każdym realnym transportem harness odrzuca też
+jednoznaczny cross-provider key swap: klucz Google o formacie `AIza…` w
+`OPENAI_API_KEY` albo klucz OpenAI `sk-…` w `GEMINI_API_KEY`. Błąd nie wypisuje
+klucza i kończy się przed requestem. Jest to bezpiecznik dla oczywistych pomyłek,
+nie zamiennik poprawnego zarządzania i rotacji sekretów.
 
 ## Jak wykonać test
 
@@ -167,7 +179,7 @@ Testy sprawdzają między innymi:
 - strict outgoing request: model snapshot, `store=false`, brak tools i brak labeli;
 - blokadę egressu do innego hosta;
 - fail-fast przy pustym TLS trust store i nieretryowalny błąd certyfikatu;
-- usuwanie sekretów z artefaktów;
+- usuwanie sekretów oraz zamaskowanych przez providera fragmentów kluczy z artefaktów;
 - action mapping;
 - retry, limiter attempts i jeden wynik na każdą próbkę;
 - prywatne uprawnienia `0700/0600`;

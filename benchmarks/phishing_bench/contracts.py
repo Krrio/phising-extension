@@ -177,6 +177,14 @@ CREWAI_CHALLENGER_VARIANTS = {
         0.10,
         1800,
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002": (
+        CREWAI_GPT54_NANO_SMOKE_PROFILE,
+        "crewai-offline__openai__gpt-5.4-nano-2026-03-17__crew-v1__reasoning-none__smoke005__timeout120__no-retry__auth-corrected-rerun-v2",
+        120,
+        15,
+        0.10,
+        1800,
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001": (
         CREWAI_GPT54_NANO_QUALITY_PILOT_PROFILE,
         "crewai-offline__openai__gpt-5.4-nano-2026-03-17__crew-v1__reasoning-none__pilot030__timeout120__no-retry-v1",
@@ -292,8 +300,13 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "LLM calls BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_"
         "SMOKE_002__20260831T165055Z__5327489f; preserve the READINESS_PASS result"
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001": (
+        "closed after the recorded 5/5 authentication failures caused by a "
+        "Gemini credential being supplied to the OpenAI endpoint; use the "
+        "separately frozen SMOKE_002 with an OpenAI API key"
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001": (
-        "prerequisite CrewAI GPT-5.4 nano SMOKE_001 has not yet produced an "
+        "prerequisite CrewAI GPT-5.4 nano SMOKE_002 has not yet produced an "
         "audited READINESS_PASS"
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001": (
@@ -466,6 +479,29 @@ IPV4_RE = re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)")
 
 class ContractError(ValueError):
     pass
+
+
+def assert_api_key_provider_compatible(
+    config: dict[str, Any], api_key: str
+) -> None:
+    """Reject only unmistakable cross-provider key swaps before network I/O."""
+
+    candidate = api_key.strip()
+    if not candidate:
+        return
+    provider = config.get("provider")
+    google_key = re.fullmatch(r"AIza[0-9A-Za-z_-]{20,}", candidate) is not None
+    openai_key = re.fullmatch(r"sk-[0-9A-Za-z_-]{8,}", candidate) is not None
+    if provider == "openai" and google_key:
+        raise ContractError(
+            f"{config['api_key_env']} appears to contain a Google API key; "
+            "no provider request was made"
+        )
+    if provider == "google" and openai_key:
+        raise ContractError(
+            f"{config['api_key_env']} appears to contain an OpenAI API key; "
+            "no provider request was made"
+        )
 
 
 def campaign_live_block_reason(config: dict[str, Any]) -> str | None:

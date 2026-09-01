@@ -14,6 +14,7 @@ from typing import Any, Iterable
 SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"\b[A-Za-z0-9._-]{4,32}\*{8,}[A-Za-z0-9._-]{2,16}\b"),
 )
 
 

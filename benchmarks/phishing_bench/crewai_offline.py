@@ -35,6 +35,7 @@ from .contracts import (
     RESERVED_DATA_DOMAINS,
     URL_RE,
     action_for_output,
+    assert_api_key_provider_compatible,
     assert_campaign_live_allowed,
     assert_pricing_current_for_run,
     build_crewai_workflow_contract,
@@ -1018,6 +1019,7 @@ def run_crewai_campaign(
         )
     if not api_key.strip():
         raise ContractError(f"{config['api_key_env']} is empty")
+    assert_api_key_provider_compatible(config, api_key)
     if os.environ.get("SSLKEYLOGFILE"):
         raise ContractError("unset SSLKEYLOGFILE before live run; TLS key logging is forbidden")
     if store_reasoning and config["security"]["data_class"] != "synthetic_reserved_domains_only":
