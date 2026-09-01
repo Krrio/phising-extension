@@ -76,16 +76,23 @@ Pierwsza natywna próba
 `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001__20260901T160523Z__0841f81d`
 została zamknięta po jednym `HTTP 503`; fail-fast nie wysłał pozostałych
 czterech requestów. Nie uzyskano usage ani wyniku jakości, a ledger zachował
-konserwatywną rezerwę `0,008313 USD`. Tabela opisuje pozostały plan od osobno
-zamrożonego `_SMOKE_002`. Po doliczeniu tej zakończonej, nieznanej kosztowo
-próby łączna konserwatywna rezerwa całej serii wynosi `2,518210 USD`.
+konserwatywną rezerwę `0,008313 USD`.
+
+Osobno zamrożony `_SMOKE_002` przeszedł 5/5: strict schema 5/5, golden actions
+5/5, zero błędów, retry, braków usage i zdarzeń bezpieczeństwa. Observed cost
+wyniósł `0,0114915 USD`, a mediana latency `11774,448 ms`. Tabela zachowuje
+pierwotną konserwatywną rezerwę tego ramienia. Po zastąpieniu rezerwy smoke
+kosztem zaobserwowanym oraz dodaniu nieznanej rezerwy `_SMOKE_001`, łączny
+znany lub konserwatywnie zarezerwowany koszt całej serii wynosi obecnie
+`2,4883375 USD`.
 
 Hard cap to awaryjny sufit, a nie prognoza rachunku. Konserwatywna rezerwa
 zakłada skrajnie niekorzystny token count i maksymalny output każdego calla;
 observed cost z usage i billing providera są właściwym wynikiem kosztowym.
-Pozostały twardy sufit aktywnych kampanii wynosi 4,40 USD. Suma skonfigurowanych
-ceilingów wraz z zamkniętym `_SMOKE_001` wynosi 4,45 USD, ale ten run zatrzymał
-się po jednym z pięciu dopuszczonych requestów.
+Pozostały twardy sufit aktywnych kampanii wynosi 4,35 USD. Suma skonfigurowanych
+ceilingów wraz z zamkniętym `_SMOKE_001` i zakończonym `_SMOKE_002` wynosi
+4,45 USD, ale `_SMOKE_001` zatrzymał się po jednym z pięciu dopuszczonych
+requestów, a `_SMOKE_002` kosztował `0,0114915 USD`.
 
 Każdy pilot ma tylko 30 wiadomości na ramię. Dla pojedynczego modelu komplet
 Direct + CrewAI to 60 ocenianych wiadomości; CrewAI generuje więcej calli, bo
@@ -103,10 +110,12 @@ nowych smoke i pilotów sumują się do 12,5 godziny, więc mieszczą się w lim
 | CrewAI + Gemini 3.1 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001` |
 | CrewAI + Gemini 3.7 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001` |
 
-Smoke są gotowe do ręcznie potwierdzonego live runu. Wszystkie piloty mają
-programowy status `LIVE_BLOCKED`, dopóki ich własny smoke nie uzyska
-audytowanego `READINESS_PASS`. Dzięki temu literówka nie uruchomi 30 lub 90
-płatnych calli przed sprawdzeniem przewodu.
+Gemini 3.7 Native Direct smoke `_002` jest zakończony i zamknięty po
+`READINESS_PASS`; odpowiadający mu pilot jest odblokowany. Cztery smoke CrewAI
+są gotowe do ręcznie potwierdzonego live runu, a ich piloty mają programowy
+status `LIVE_BLOCKED`, dopóki własny smoke nie uzyska audytowanego
+`READINESS_PASS`. Dzięki temu literówka nie uruchomi 90 płatnych calli przed
+sprawdzeniem przewodu.
 
 ## Etap 0 — czysty commit i kontrola bez kosztu
 
@@ -198,27 +207,26 @@ pilot.
 
 ## Etap 2 — piloty pojedynczo
 
-Po przejściu i odblokowaniu konkretnego smoke użyj odpowiadającego ID pilota z
-tabeli kampanii. Schemat live runu jest identyczny:
+Aktualnie odblokowany jest wyłącznie pilot Gemini 3.7 Native Direct:
 
 ```bash
-CAMPAIGN_ID="TU_DOKŁADNY_ODBLOKOWANY_PILOT_ID"
+CAMPAIGN_ID="BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001"
 CONFIG="benchmarks/campaigns/$CAMPAIGN_ID/runtime_config.json"
 
-read -s OPENAI_API_KEY
+read -s GEMINI_API_KEY
 echo
-export OPENAI_API_KEY
+export GEMINI_API_KEY
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
   --campaign "$CONFIG" \
   --live \
   --confirm-campaign "$CAMPAIGN_ID"
 
-unset OPENAI_API_KEY
+unset GEMINI_API_KEY
 ```
 
-Dla kampanii Google zamień wyłącznie nazwę zmiennej klucza na
-`GEMINI_API_KEY`. Następnie wykonaj scoring pilotowy:
+Po odblokowaniu późniejszych kampanii schemat pozostaje ten sam; dla OpenAI
+użyj `OPENAI_API_KEY`. Następnie wykonaj scoring pilotowy:
 
 ```bash
 RUN_DIR="$(find "$PWD/benchmark-runs" -maxdepth 1 -type d \

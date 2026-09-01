@@ -223,8 +223,8 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
         self.assertEqual(len(pilot_assets["dataset"]), 30)
 
         self.assertIn("HTTP 503", campaign_live_block_reason(closed_smoke) or "")
-        self.assertIsNone(campaign_live_block_reason(smoke))
-        self.assertIn("prerequisite", campaign_live_block_reason(pilot) or "")
+        self.assertIn("recorded 5/5", campaign_live_block_reason(smoke) or "")
+        self.assertIsNone(campaign_live_block_reason(pilot))
         self.assertIn(
             SMOKE_ID, read_json(SMOKE_MANIFEST)["compatible_campaign_ids"]
         )
@@ -236,17 +236,18 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
             PILOT_ID, read_json(PILOT_MANIFEST)["compatible_campaign_ids"]
         )
 
-    def test_readiness_exposes_native_contract_and_blocks_only_pilot(self) -> None:
+    def test_readiness_exposes_native_contract_and_completed_smoke_gate(self) -> None:
         closed_smoke_report = readiness_report(CLOSED_SMOKE_CONFIG, REPO_ROOT)
         smoke_report = readiness_report(SMOKE_CONFIG, REPO_ROOT)
         pilot_report = readiness_report(PILOT_CONFIG, REPO_ROOT)
 
         self.assertEqual(closed_smoke_report["status"], "LIVE_BLOCKED")
         self.assertIn("HTTP 503", closed_smoke_report["live_block_reason"])
+        self.assertEqual(smoke_report["status"], "LIVE_BLOCKED")
+        self.assertIn("recorded 5/5", smoke_report["live_block_reason"])
         self.assertEqual(
-            smoke_report["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+            pilot_report["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
         )
-        self.assertEqual(pilot_report["status"], "LIVE_BLOCKED")
         self.assertEqual(
             smoke_report["request_contract"],
             {

@@ -262,9 +262,10 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "503 on its first request and the transient fail-fast policy stopped "
         "the remaining four samples; use the separately frozen SMOKE_002"
     ),
-    "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001": (
-        "prerequisite Direct native Gemini 3.7 SMOKE_002 has not yet produced "
-        "an audited READINESS_PASS"
+    "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002": (
+        "closed after the recorded 5/5 successful native GenerateContent "
+        "smoke BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"
+        "__20260901T161107Z__67004817; use the unlocked pilot"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001": (
         "obsolete 45-second timeout; replaced by PILOT_030_002 after the "
