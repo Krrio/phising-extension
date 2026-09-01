@@ -83,16 +83,24 @@ Osobno zamrożony `_SMOKE_002` przeszedł 5/5: strict schema 5/5, golden actions
 wyniósł `0,0114915 USD`, a mediana latency `11774,448 ms`. Tabela zachowuje
 pierwotną konserwatywną rezerwę tego ramienia. Po zastąpieniu rezerwy smoke
 kosztem zaobserwowanym oraz dodaniu nieznanej rezerwy `_SMOKE_001`, łączny
-znany lub konserwatywnie zarezerwowany koszt całej serii wynosi obecnie
+znany lub konserwatywnie zarezerwowany koszt całej serii przed pilotem wynosił
 `2,4883375 USD`.
+
+Pilot Native Direct zakończył się 29/30 `success` i jednym
+`incomplete_output` (`case_038`, finish reason `length`) bez retry i bez braków
+usage. Opisowa confusion matrix po zastosowaniu zamrożonej akcji awaryjnej to
+`TP=15, FP=0, TN=15, FN=0`, ale bramka `technical_failures_zero` wymusiła
+`PILOT_HOLD`. Observed cost wyniósł `0,0735135 USD`, a mediana latency sukcesów
+`9903,467 ms`. Po zastąpieniu rezerwy pilota kosztem zaobserwowanym łączny znany
+lub konserwatywnie zarezerwowany koszt całej serii wynosi `2,31591325 USD`.
 
 Hard cap to awaryjny sufit, a nie prognoza rachunku. Konserwatywna rezerwa
 zakłada skrajnie niekorzystny token count i maksymalny output każdego calla;
 observed cost z usage i billing providera są właściwym wynikiem kosztowym.
-Pozostały twardy sufit aktywnych kampanii wynosi 4,35 USD. Suma skonfigurowanych
-ceilingów wraz z zamkniętym `_SMOKE_001` i zakończonym `_SMOKE_002` wynosi
-4,45 USD, ale `_SMOKE_001` zatrzymał się po jednym z pięciu dopuszczonych
-requestów, a `_SMOKE_002` kosztował `0,0114915 USD`.
+Pozostały twardy sufit aktywnych kampanii wynosi 3,70 USD. Suma skonfigurowanych
+ceilingów wraz z zamkniętym `_SMOKE_001`, zakończonym `_SMOKE_002` i pilotem
+wynosi 4,45 USD, ale faktyczny koszt dwóch zakończonych kampanii z kompletnym
+usage to `0,085005 USD`; `_SMOKE_001` zachowuje osobną rezerwę `0,008313 USD`.
 
 Każdy pilot ma tylko 30 wiadomości na ramię. Dla pojedynczego modelu komplet
 Direct + CrewAI to 60 ocenianych wiadomości; CrewAI generuje więcej calli, bo
@@ -110,12 +118,11 @@ nowych smoke i pilotów sumują się do 12,5 godziny, więc mieszczą się w lim
 | CrewAI + Gemini 3.1 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001` |
 | CrewAI + Gemini 3.7 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001` |
 
-Gemini 3.7 Native Direct smoke `_002` jest zakończony i zamknięty po
-`READINESS_PASS`; odpowiadający mu pilot jest odblokowany. Cztery smoke CrewAI
-są gotowe do ręcznie potwierdzonego live runu, a ich piloty mają programowy
-status `LIVE_BLOCKED`, dopóki własny smoke nie uzyska audytowanego
-`READINESS_PASS`. Dzięki temu literówka nie uruchomi 90 płatnych calli przed
-sprawdzeniem przewodu.
+Gemini 3.7 Native Direct smoke `_002` i pilot są zakończone oraz zamknięte przed
+ponowieniem. Cztery smoke CrewAI są gotowe do ręcznie potwierdzonego live runu,
+a ich piloty mają programowy status `LIVE_BLOCKED`, dopóki własny smoke nie
+uzyska audytowanego `READINESS_PASS`. Dzięki temu literówka nie uruchomi 90
+płatnych calli przed sprawdzeniem przewodu.
 
 ## Etap 0 — czysty commit i kontrola bez kosztu
 
@@ -128,34 +135,34 @@ env -u OPENAI_API_KEY -u GEMINI_API_KEY PYTHONWARNINGS=ignore \
   backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -q
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
-  --campaign benchmarks/campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/runtime_config.json
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign benchmarks/campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/runtime_config.json
 ```
 
 Ostatnia komenda jest dry-runem. Bez `--live` nie wykonuje requestu.
 
 ## Etap 1 — smoke pojedynczo
 
-Zaczynamy od Gemini 3.7 Native Direct, ponieważ poprzedni adapter Interactions
-nie zwrócił odpowiedzi nawet przy 120 sekundach. Wczytaj klucz bez wyświetlania
-go i wykonaj dokładnie jeden campaign ID:
+Gemini 3.7 Native Direct jest już zakończony; nie uruchamiaj ponownie jego smoke
+ani pilota. Następny aktywny smoke to CrewAI + GPT-5.4 Nano. Wczytaj klucz bez
+wyświetlania go i wykonaj dokładnie jeden campaign ID:
 
 ```bash
-CAMPAIGN_ID="BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"
+CAMPAIGN_ID="BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001"
 CONFIG="benchmarks/campaigns/$CAMPAIGN_ID/runtime_config.json"
 
-read -s GEMINI_API_KEY
+read -s OPENAI_API_KEY
 echo
-export GEMINI_API_KEY
+export OPENAI_API_KEY
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
   --campaign "$CONFIG" \
   --live \
   --confirm-campaign "$CAMPAIGN_ID"
 
-unset GEMINI_API_KEY
+unset OPENAI_API_KEY
 ```
 
 Po runie policz wynik. Nie wpisuj dosłownego placeholdera ścieżki:
@@ -175,12 +182,11 @@ Kolejne smoke uruchamiaj tą samą procedurą, jeden po drugim. Dla OpenAI użyj
 `read -s OPENAI_API_KEY`, `export OPENAI_API_KEY` i na końcu
 `unset OPENAI_API_KEY`; dla Google analogicznie `GEMINI_API_KEY`.
 
-Rekomendowana kolejność po Gemini 3.7 Native Direct:
+Rekomendowana kolejność po CrewAI + GPT-5.4 Nano:
 
-1. `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001`;
-2. `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001`;
-3. `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001`;
-4. `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001`.
+1. `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001`;
+2. `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001`;
+3. `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001`.
 
 Dla każdego ID ustaw:
 
@@ -207,26 +213,28 @@ pilot.
 
 ## Etap 2 — piloty pojedynczo
 
-Aktualnie odblokowany jest wyłącznie pilot Gemini 3.7 Native Direct:
+Pilot Gemini 3.7 Native Direct jest zakończony i nie wolno go ponawiać. Po
+przejściu kolejnego smoke CrewAI odblokuj wyłącznie odpowiadający mu pilot i
+użyj jego dokładnego ID z tabeli:
 
 ```bash
-CAMPAIGN_ID="BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001"
+CAMPAIGN_ID="TU_DOKŁADNY_ODBLOKOWANY_PILOT_ID"
 CONFIG="benchmarks/campaigns/$CAMPAIGN_ID/runtime_config.json"
 
-read -s GEMINI_API_KEY
+read -s OPENAI_API_KEY
 echo
-export GEMINI_API_KEY
+export OPENAI_API_KEY
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
   --campaign "$CONFIG" \
   --live \
   --confirm-campaign "$CAMPAIGN_ID"
 
-unset GEMINI_API_KEY
+unset OPENAI_API_KEY
 ```
 
-Po odblokowaniu późniejszych kampanii schemat pozostaje ten sam; dla OpenAI
-użyj `OPENAI_API_KEY`. Następnie wykonaj scoring pilotowy:
+Dla kampanii Google zamień nazwę zmiennej klucza na `GEMINI_API_KEY`. Następnie
+wykonaj scoring pilotowy:
 
 ```bash
 RUN_DIR="$(find "$PWD/benchmark-runs" -maxdepth 1 -type d \

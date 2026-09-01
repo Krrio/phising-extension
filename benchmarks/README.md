@@ -22,18 +22,28 @@ Przed implementacją wprowadzono pięć korekt:
 
 ## Co jest gotowe
 
-Gotowe, wykonane i policzone jest siedem torów: bazowy OpenAI Direct, CrewAI Offline z OpenAI, OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`, Google Direct `gemini-3.5-flash-lite` i `gemini-3.1-flash-lite` oraz CrewAI Offline z natywnym Google `gemini-3.5-flash-lite`. Każdy przeszedł smoke `n=5` i technicznie poprawny pilot jakości `n=30`; każdy pilot ma status `PILOT_HOLD`. Wykonany offline eksport `SEVEN_WAY_PILOT_030_001` obejmuje wszystkie siedem wariantów i nie nadpisuje wcześniejszych eksportów. Osobne `FIVE_DIRECT_PILOT_030_001` oraz `GEMINI35_DIRECT_VS_CREWAI_GEMINI_PILOT_030_001` rozdzielają porównanie modeli Direct od porównania całych system bundles.
+Gotowe, wykonane i policzone jest osiem torów: bazowy OpenAI Direct, CrewAI Offline z OpenAI, OpenAI Direct z przypiętymi `gpt-5.4-nano-2026-03-17` i `gpt-5.4-mini-2026-03-17`, Google Direct `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` i natywny `gemini-3.7-flash` oraz CrewAI Offline z natywnym Google `gemini-3.5-flash-lite`. Każdy przeszedł smoke `n=5` i pilot jakości `n=30`; pilot Gemini 3.7 miał 29/30 sukcesów i jeden `incomplete_output`, a pozostałe siedem było technicznie kompletne. Wszystkie piloty zachowują status `PILOT_HOLD`. Historyczny eksport `SEVEN_WAY_PILOT_030_001` nadal obejmuje poprzednie siedem wariantów; Gemini 3.7 trafi do nowego eksportu dopiero razem z pozostałymi ramionami pełnej macierzy. Osobne `FIVE_DIRECT_PILOT_030_001` oraz `GEMINI35_DIRECT_VS_CREWAI_GEMINI_PILOT_030_001` rozdzielają porównanie modeli Direct od porównania całych system bundles.
 
 Oba smoke Gemini 3.7 są zachowanymi negatywnymi wynikami technicznymi. `SMOKE_001` zakończył 10/10 prób timeoutem po 45 s, a diagnostyczny `SMOKE_002` zakończył 5/5 prób timeoutem po 120 s mimo wyłączenia retry. W obu runach brak odpowiedzi i usage; łączna konserwatywna rezerwa nierozstrzygniętego kosztu to `0,124812 USD`. Tor Direct Gemini 3.7 przez synchroniczne stateless Interactions API jest zamknięty, a pilot zablokowany.
 
 Przygotowana 1 września 2026 rozbudowa nie zmienia tych historycznych wyników.
 Dodaje osobno wersjonowany Direct Gemini 3.7 przez natywne GenerateContent v1
 oraz brakujące pary CrewAI dla GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini
-3.7. Natywny Direct Gemini 3.7 przeszedł już smoke `_002`, dlatego wyłącznie
-jego pilot jest gotowy do ręcznego live confirmation. Pozostałe nowe smoke
-CrewAI są gotowe, a ich piloty pozostają `LIVE_BLOCKED` do czasu przejścia
-własnego smoke. Dokładny stan, budżet i komendy zawiera
+3.7. Natywny Direct Gemini 3.7 zakończył smoke `_002` i pilot n=30; oba ID są
+zamknięte przed ponowieniem. Pozostałe nowe smoke CrewAI są gotowe, a ich
+piloty pozostają `LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny
+stan, budżet i komendy zawiera
 [`FULL_MODEL_MATRIX_RUNBOOK.md`](FULL_MODEL_MATRIX_RUNBOOK.md).
+
+Pilot natywnego Direct Gemini 3.7 zakończył 30/30 rekordów i 30 attempts bez
+retry: 29 `success` oraz jeden `incomplete_output` (`case_038`, finish reason
+`length`, 485 output tokens + 375 reasoning tokens). Zamrożona akcja techniczna
+`allow` pozostawiła opisową confusion matrix `TP=15, FP=0, TN=15, FN=0`, ale
+bramka `technical_failures_zero` nie przeszła, więc status to `PILOT_HOLD`, nie
+pełny sukces jakości. Usage jest kompletne, observed cost wyniósł
+`0,0735135 USD`, mediana latency sukcesów `9903,467 ms`, a zdarzeń security nie
+było. Run pozostaje pełnym wynikiem i nie wolno go powtarzać na tym samym
+zbiorze.
 
 Pierwszy live smoke CrewAI Offline + natywny Google `gemini-3.5-flash-lite` jest zachowanym `READINESS_FAIL`: cztery pierwsze calle zakończyły się `504 DEADLINE_EXCEEDED` przy lokalnym limicie 45 s, a piąty jawnym `503 UNAVAILABLE`. Osobny `SMOKE_002` z timeoutem 120 s i zero retry zakończył się `READINESS_PASS`: 5/5 wyników, 15/15 poprawnych calli, brak błędów i zdarzeń security, observed cost `0,0112299 USD`, mediana end-to-end `4469,763 ms`. Pilot `PILOT_030_002` zachował tę samą politykę i zakończył 30/30 workflow bez błędów, 90/90 calli, kosztem `0,0656925 USD` i medianą `4188,024 ms`. Oba zakończone campaign IDs oraz stary pilot 45 s są teraz programowo zablokowane przed rerunem.
 
@@ -113,7 +123,7 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_GOOGLE_GEMINI37_FLASH_PILOT_030_001/` | zablokowany po dwóch negatywnych smoke; nie uruchamiać |
 | `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_001/` | zachowany `READINESS_FAIL`: pierwszy request GenerateContent zwrócił HTTP 503, a fail-fast zatrzymał pozostałe cztery próbki; nie uruchamiać ponownie |
 | `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002/` | zakończony `READINESS_PASS`: 5/5 sukcesów, zero retry i błędów, koszt `0,0114915 USD`, mediana `11774,448 ms`; nie uruchamiać ponownie |
-| `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001/` | pilot n=30 odblokowany po pełnym audycie smoke `_002`; gotowy do jednej ręcznie potwierdzonej próby |
+| `campaigns/BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001/` | zakończony `PILOT_HOLD`: 29/30 sukcesów, jeden `incomplete_output`, koszt `0,0735135 USD`, mediana sukcesów `9903,467 ms`; nie uruchamiać ponownie |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/` | utwardzony profil Crew, prompt, frozen evidence i kampania smoke 5 × 3 calls |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_PILOT_030_001/` | ten sam zestaw 30 co Direct, limit 90 calls / 0,25 USD / 2 h |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5 calli pierwszej roli, 4 × 504 i 1 × 503, bez retry; nie uruchamiać ponownie |

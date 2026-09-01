@@ -159,12 +159,26 @@ def _validate_quality_run_profile(
         and required_reservation == round(float(projected_reservation) * 1.2, 10)
         and required_reservation <= float(runtime_config["budget"]["max_cost_usd"])
     )
-    is_gemini = runtime_config.get("adapter") == "gemini_interactions"
+    adapter = runtime_config.get("adapter")
+    is_gemini_interactions = adapter == "gemini_interactions"
+    is_gemini_native = adapter == "gemini_generate_content"
     if runtime_config.get("evaluation_profile") in CREWAI_PROFILES:
         from .crewai_offline import crewai_security_contract
 
         expected_security_contract = crewai_security_contract(runtime_config)
-    elif is_gemini:
+    elif is_gemini_native:
+        expected_security_contract = {
+            "store": False,
+            "tools": "absent",
+            "provider_api": "native_generate_content_v1",
+            "conversation": "one_fresh_contents_request_per_sample",
+            "background": "absent",
+            "stream": "absent",
+            "provider_egress": "generativelanguage.googleapis.com_only",
+            "runtime_config_exposes_scoring_path": False,
+            "input_data_class": runtime_config["security"]["data_class"],
+        }
+    elif is_gemini_interactions:
         expected_security_contract = {
             "store": False,
             "tools": "absent",
@@ -501,10 +515,10 @@ def score_quality_run(
         manifest.get("runtime_config", {}).get("adapter")
         == "crewai_sequential_offline"
     )
-    is_gemini = (
-        manifest.get("runtime_config", {}).get("adapter")
-        == "gemini_interactions"
-    )
+    is_gemini = manifest.get("runtime_config", {}).get("adapter") in {
+        "gemini_interactions",
+        "gemini_generate_content",
+    }
     retry_attempts = (
         0
         if is_crewai

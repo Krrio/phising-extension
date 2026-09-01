@@ -267,6 +267,12 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "smoke BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"
         "__20260901T161107Z__67004817; use the unlocked pilot"
     ),
+    "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001": (
+        "closed after the recorded 29/30 success plus one incomplete_output "
+        "native GenerateContent pilot BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_"
+        "PILOT_030_001__20260901T162154Z__db1155ac; preserve the PILOT_HOLD "
+        "result and do not rerun the frozen evaluation set"
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001": (
         "obsolete 45-second timeout; replaced by PILOT_030_002 after the "
         "successful SMOKE_002"

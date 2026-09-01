@@ -65,6 +65,9 @@ PILOT_MANIFEST = (
     / "openai_pilot_030_v1"
     / "scoring_manifest.json"
 )
+PILOT_LABELS = (
+    BENCHMARKS_DIR / "secure_scoring" / "openai_pilot_030_v1" / "labels.jsonl"
+)
 MODEL = "gemini-3.7-flash"
 ENDPOINT = GEMINI_GENERATE_CONTENT_ENDPOINTS[MODEL]
 FAKE_KEY = "synthetic-gemini-native-key-never-live"
@@ -224,7 +227,7 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
 
         self.assertIn("HTTP 503", campaign_live_block_reason(closed_smoke) or "")
         self.assertIn("recorded 5/5", campaign_live_block_reason(smoke) or "")
-        self.assertIsNone(campaign_live_block_reason(pilot))
+        self.assertIn("29/30", campaign_live_block_reason(pilot) or "")
         self.assertIn(
             SMOKE_ID, read_json(SMOKE_MANIFEST)["compatible_campaign_ids"]
         )
@@ -236,7 +239,7 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
             PILOT_ID, read_json(PILOT_MANIFEST)["compatible_campaign_ids"]
         )
 
-    def test_readiness_exposes_native_contract_and_completed_smoke_gate(self) -> None:
+    def test_readiness_exposes_native_contract_and_completed_campaign_gates(self) -> None:
         closed_smoke_report = readiness_report(CLOSED_SMOKE_CONFIG, REPO_ROOT)
         smoke_report = readiness_report(SMOKE_CONFIG, REPO_ROOT)
         pilot_report = readiness_report(PILOT_CONFIG, REPO_ROOT)
@@ -245,9 +248,8 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
         self.assertIn("HTTP 503", closed_smoke_report["live_block_reason"])
         self.assertEqual(smoke_report["status"], "LIVE_BLOCKED")
         self.assertIn("recorded 5/5", smoke_report["live_block_reason"])
-        self.assertEqual(
-            pilot_report["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
-        )
+        self.assertEqual(pilot_report["status"], "LIVE_BLOCKED")
+        self.assertIn("29/30", pilot_report["live_block_reason"])
         self.assertEqual(
             smoke_report["request_contract"],
             {
@@ -487,6 +489,43 @@ class GeminiNativeDirectContractTests(unittest.TestCase):
         self.assertEqual(metrics["campaign_status"], "READINESS_PASS")
         self.assertEqual(metrics["security"]["critical_events"], 0)
         self.assertEqual(metrics["security"]["provider_metadata_omissions"], 0)
+
+    def test_fake_native_quality_pilot_runs_and_scores_all_thirty_records(self) -> None:
+        _, assets = load_and_validate_campaign(PILOT_CONFIG, REPO_ROOT)
+        labels = {row["sample_id"]: row for row in read_jsonl(PILOT_LABELS)}
+        plans = [
+            _output(labels[row["sample_id"]]["class_label"] == "malicious")
+            for row in assets["dataset"]
+        ]
+        transport = FakeNativeTransport(plans=plans)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = run_campaign(
+                config_path=PILOT_CONFIG,
+                repo_root=REPO_ROOT,
+                output_root=Path(temporary) / "runs",
+                api_key=FAKE_KEY,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            score_dir = score_run(
+                run_dir=run_dir,
+                labels_path=PILOT_LABELS,
+                output_dir=None,
+                repo_root=REPO_ROOT,
+            )
+            metrics = read_json(score_dir / "metrics.json")
+            results = read_jsonl(run_dir / "results.jsonl")
+            report_text = (score_dir / "report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(len(transport.calls), 30)
+        self.assertEqual(len(results), 30)
+        self.assertTrue(all(result["status"] == "success" for result in results))
+        self.assertEqual(metrics["campaign_status"], "PILOT_READY_FOR_SELECTION")
+        self.assertEqual(metrics["evaluation_track"], "gemini_direct")
+        self.assertTrue(metrics["validity"]["usage_accounting_complete"])
+        self.assertEqual(metrics["failures"]["critical_security_events"], 0)
+        self.assertIn("Google Gemini Direct", report_text)
 
 
 if __name__ == "__main__":
