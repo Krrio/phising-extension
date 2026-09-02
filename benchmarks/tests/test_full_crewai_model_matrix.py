@@ -250,7 +250,9 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                     self.assertIn(
                         "57ccf719", campaign_live_block_reason(smoke) or ""
                     )
-                    self.assertIsNone(campaign_live_block_reason(pilot))
+                    self.assertIn(
+                        "d4383f53", campaign_live_block_reason(pilot) or ""
+                    )
                 else:
                     self.assertIsNone(campaign_live_block_reason(smoke))
                     self.assertIn(

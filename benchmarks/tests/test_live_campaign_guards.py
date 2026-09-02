@@ -110,6 +110,12 @@ CREW_GEMINI31_SMOKE_002_CONFIG = (
     / CREW_GEMINI31_SMOKE_002_ID
     / "runtime_config.json"
 )
+CREW_GEMINI31_PILOT_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI31_PILOT_002_ID
+    / "runtime_config.json"
+)
 CREW_GPT54_NANO_SMOKE_001_CONFIG = (
     BENCHMARKS_DIR
     / "campaigns"
@@ -237,6 +243,11 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 CREW_GEMINI31_SMOKE_002_CONFIG,
                 "audited 5/5 successful",
             ),
+            (
+                CREW_GEMINI31_PILOT_002_ID,
+                CREW_GEMINI31_PILOT_002_CONFIG,
+                "recorded 30/30 technically successful",
+            ),
         ):
             with self.subTest(campaign_id=campaign_id):
                 config, _ = load_and_validate_campaign(config_path, REPO_ROOT)
@@ -268,6 +279,7 @@ class ClosedCampaignGuardTests(unittest.TestCase):
             (CREW_GPT54_NANO_SMOKE_003_ID, CREW_GPT54_NANO_SMOKE_003_CONFIG),
             (CREW_GPT54_NANO_PILOT_002_ID, CREW_GPT54_NANO_PILOT_002_CONFIG),
             (CREW_GEMINI31_SMOKE_002_ID, CREW_GEMINI31_SMOKE_002_CONFIG),
+            (CREW_GEMINI31_PILOT_002_ID, CREW_GEMINI31_PILOT_002_CONFIG),
         ):
             with self.subTest(campaign_id=campaign_id):
                 stderr = io.StringIO()
