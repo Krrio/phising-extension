@@ -80,6 +80,9 @@ CREW_GPT54_NANO_PILOT_002_ID = (
 CREW_GPT54_MINI_SMOKE_002_ID = (
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002"
 )
+CREW_GPT54_MINI_PILOT_002_ID = (
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002"
+)
 G37_PILOT_CONFIG = (
     BENCHMARKS_DIR / "campaigns" / G37_PILOT_ID / "runtime_config.json"
 )
@@ -144,6 +147,12 @@ CREW_GPT54_MINI_SMOKE_002_CONFIG = (
     BENCHMARKS_DIR
     / "campaigns"
     / CREW_GPT54_MINI_SMOKE_002_ID
+    / "runtime_config.json"
+)
+CREW_GPT54_MINI_PILOT_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GPT54_MINI_PILOT_002_ID
     / "runtime_config.json"
 )
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
@@ -248,6 +257,11 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 CREW_GEMINI31_PILOT_002_CONFIG,
                 "recorded 30/30 technically successful",
             ),
+            (
+                CREW_GPT54_MINI_SMOKE_002_ID,
+                CREW_GPT54_MINI_SMOKE_002_CONFIG,
+                "audited 5/5 successful",
+            ),
         ):
             with self.subTest(campaign_id=campaign_id):
                 config, _ = load_and_validate_campaign(config_path, REPO_ROOT)
@@ -280,6 +294,7 @@ class ClosedCampaignGuardTests(unittest.TestCase):
             (CREW_GPT54_NANO_PILOT_002_ID, CREW_GPT54_NANO_PILOT_002_CONFIG),
             (CREW_GEMINI31_SMOKE_002_ID, CREW_GEMINI31_SMOKE_002_CONFIG),
             (CREW_GEMINI31_PILOT_002_ID, CREW_GEMINI31_PILOT_002_CONFIG),
+            (CREW_GPT54_MINI_SMOKE_002_ID, CREW_GPT54_MINI_SMOKE_002_CONFIG),
         ):
             with self.subTest(campaign_id=campaign_id):
                 stderr = io.StringIO()
@@ -317,10 +332,10 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 [
                     "run",
                     "--campaign",
-                    str(CREW_GPT54_MINI_SMOKE_002_CONFIG),
+                    str(CREW_GPT54_MINI_PILOT_002_CONFIG),
                     "--live",
                     "--confirm-campaign",
-                    CREW_GPT54_MINI_SMOKE_002_ID,
+                    CREW_GPT54_MINI_PILOT_002_ID,
                 ]
             )
 

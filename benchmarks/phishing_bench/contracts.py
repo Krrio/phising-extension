@@ -414,12 +414,15 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "unrun CrewAI v1 campaign superseded before live execution by the "
         "shared concise-v2 matrix protocol; use SMOKE_002"
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002": (
+        "closed after the audited 5/5 successful concise-v2 smoke with "
+        "15/15 calls ending in stop, zero technical or security failures, "
+        "and complete usage in run BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_"
+        "OFFLINE_SMOKE_002__20260902T080859Z__f469a51c; use the unlocked "
+        "concise-v2 pilot"
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001": (
         "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
-    ),
-    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002": (
-        "prerequisite CrewAI GPT-5.4 Mini concise-v2 SMOKE_002 has not yet "
-        "produced an audited READINESS_PASS"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001": (
         "unrun CrewAI v1 campaign superseded before live execution by the "
