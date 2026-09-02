@@ -232,7 +232,7 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
         )
         self.assertIn("najwyżej 600 znaków", str(crew_profiles[0]))
 
-    def test_only_nano_pilot_is_unlocked_after_its_audited_smoke(self) -> None:
+    def test_completed_nano_arm_is_closed_while_other_smokes_are_ready(self) -> None:
         matrix_campaign_ids = set()
         for name, row in MATRIX.items():
             with self.subTest(model=name):
@@ -243,7 +243,9 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                     self.assertIn(
                         "64067e56", campaign_live_block_reason(smoke) or ""
                     )
-                    self.assertIsNone(campaign_live_block_reason(pilot))
+                    self.assertIn(
+                        "195f5483", campaign_live_block_reason(pilot) or ""
+                    )
                 else:
                     self.assertIsNone(campaign_live_block_reason(smoke))
                     self.assertIn(

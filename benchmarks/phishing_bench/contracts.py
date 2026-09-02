@@ -404,6 +404,12 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "specialist truncation; use concise-v2 PILOT_030_002 only after "
         "SMOKE_003 passes"
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002": (
+        "closed after the recorded 30/30 technically successful concise-v2 "
+        "quality pilot BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_"
+        "030_002__20260902T072050Z__195f5483; preserve the PILOT_HOLD result "
+        "with TP=15, FP=10, TN=5, FN=0 and do not rerun the frozen set"
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001": (
         "unrun CrewAI v1 campaign superseded before live execution by the "
         "shared concise-v2 matrix protocol; use SMOKE_002"
