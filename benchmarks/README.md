@@ -145,9 +145,9 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, 90 calli, koszt `0,0656925 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5/5 błędów uwierzytelnienia po użyciu klucza Gemini wobec OpenAI, bez wyniku modelu; nie uruchamiać ponownie |
 | `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/` | zachowany `READINESS_FAIL`: 15/15 calli, lecz 9/10 raportów specjalistów zakończonych `length`; koszt `0,011212 USD`; nie uruchamiać ponownie |
-| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003/` | aktywny smoke wspólnego concise-v2; nadal 500 tokenów, zero retry i 15 calli |
+| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli zakończonych `stop`, koszt `0,00627115 USD`, mediana `5249,214 ms`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/{crew_system_prompt_v2.txt,crew_profile_v2.json}` | wspólny, zamrożony kontrakt krótkich raportów specjalistów dla czterech nowych ramion CrewAI |
-| `campaigns/BUDGET_30H_CREWAI_{OPENAI,GOOGLE}_*/` | nowe concise-v2 smoke/pilot mają osobne ID; smoke są aktywne, piloty programowo zablokowane do własnej bramki |
+| `campaigns/BUDGET_30H_CREWAI_{OPENAI,GOOGLE}_*/` | nowe concise-v2 smoke/pilot mają osobne ID; pilot Nano jest odblokowany po audycie smoke, a pozostałe piloty czekają na własne bramki |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
 | `phishing_bench/gemini_direct.py` | bezpośrednie transporty Gemini Interactions i natywnego GenerateContent z izolacją sieci, jawnymi kontraktami, limitem odpowiedzi i bezpiecznym parsowaniem usage |

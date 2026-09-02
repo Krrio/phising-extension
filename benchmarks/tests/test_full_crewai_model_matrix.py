@@ -232,15 +232,23 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
         )
         self.assertIn("najwyżej 600 znaków", str(crew_profiles[0]))
 
-    def test_only_smokes_are_live_ready_before_their_own_gate_passes(self) -> None:
+    def test_only_nano_pilot_is_unlocked_after_its_audited_smoke(self) -> None:
         matrix_campaign_ids = set()
         for name, row in MATRIX.items():
             with self.subTest(model=name):
                 smoke, _ = load_and_validate_campaign(row["crew"][0], REPO_ROOT)
                 pilot, _ = load_and_validate_campaign(row["crew"][1], REPO_ROOT)
                 matrix_campaign_ids.update((smoke["campaign_id"], pilot["campaign_id"]))
-                self.assertIsNone(campaign_live_block_reason(smoke))
-                self.assertIn("prerequisite", campaign_live_block_reason(pilot) or "")
+                if name == "gpt54_nano":
+                    self.assertIn(
+                        "64067e56", campaign_live_block_reason(smoke) or ""
+                    )
+                    self.assertIsNone(campaign_live_block_reason(pilot))
+                else:
+                    self.assertIsNone(campaign_live_block_reason(smoke))
+                    self.assertIn(
+                        "prerequisite", campaign_live_block_reason(pilot) or ""
+                    )
         self.assertEqual(matrix_campaign_ids, set(CREWAI_CONCISE_V2_CAMPAIGN_IDS))
 
     def test_v1_matrix_campaigns_cannot_be_mixed_with_concise_v2(self) -> None:

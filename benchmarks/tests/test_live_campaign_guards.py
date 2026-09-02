@@ -74,6 +74,9 @@ CREW_GPT54_NANO_SMOKE_002_ID = (
 CREW_GPT54_NANO_SMOKE_003_ID = (
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003"
 )
+CREW_GPT54_NANO_PILOT_002_ID = (
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002"
+)
 G37_PILOT_CONFIG = (
     BENCHMARKS_DIR / "campaigns" / G37_PILOT_ID / "runtime_config.json"
 )
@@ -114,6 +117,12 @@ CREW_GPT54_NANO_SMOKE_003_CONFIG = (
     BENCHMARKS_DIR
     / "campaigns"
     / CREW_GPT54_NANO_SMOKE_003_ID
+    / "runtime_config.json"
+)
+CREW_GPT54_NANO_PILOT_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GPT54_NANO_PILOT_002_ID
     / "runtime_config.json"
 )
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
@@ -263,10 +272,10 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 [
                     "run",
                     "--campaign",
-                    str(CREW_GPT54_NANO_SMOKE_003_CONFIG),
+                    str(CREW_GPT54_NANO_PILOT_002_CONFIG),
                     "--live",
                     "--confirm-campaign",
-                    CREW_GPT54_NANO_SMOKE_003_ID,
+                    CREW_GPT54_NANO_PILOT_002_ID,
                 ]
             )
 

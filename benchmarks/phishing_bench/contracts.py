@@ -392,14 +392,17 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002__20260901T212255Z__"
         "43eb0248; preserve the v1 result and use shared concise-v2 SMOKE_003"
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003": (
+        "closed after the audited 5/5 successful concise-v2 smoke with "
+        "15/15 calls ending in stop, zero technical or security failures, "
+        "and complete usage in run BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_"
+        "OFFLINE_SMOKE_003__20260902T070059Z__64067e56; use the unlocked "
+        "concise-v2 pilot"
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001": (
         "obsolete CrewAI v1 pilot after Nano SMOKE_002 exposed deterministic "
         "specialist truncation; use concise-v2 PILOT_030_002 only after "
         "SMOKE_003 passes"
-    ),
-    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002": (
-        "prerequisite CrewAI GPT-5.4 Nano concise-v2 SMOKE_003 has not yet "
-        "produced an audited READINESS_PASS"
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001": (
         "unrun CrewAI v1 campaign superseded before live execution by the "
