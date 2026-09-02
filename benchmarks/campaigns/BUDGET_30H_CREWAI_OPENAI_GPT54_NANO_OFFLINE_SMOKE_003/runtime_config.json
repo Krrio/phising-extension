@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "campaign_id": "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003",
+  "stage": "ENGINEERING_PILOT",
+  "provider": "openai",
+  "adapter": "crewai_sequential_offline",
+  "endpoint": "https://api.openai.com/v1/chat/completions",
+  "api_key_env": "OPENAI_API_KEY",
+  "evaluation_profile": "crewai_openai_gpt54_nano_offline_smoke_v1",
+  "expected_sample_count": 5,
+  "config_id": "crewai-offline__openai__gpt-5.4-nano-2026-03-17__crew-v2-concise-specialists__reasoning-none__smoke005__timeout120__no-retry-v3",
+  "requested_model": "gpt-5.4-nano-2026-03-17",
+  "request_profile": "chat_completions_gpt54_reasoning_none_v1",
+  "reasoning_effort": "none",
+  "crewai_version": "1.15.8",
+  "dataset_path": "benchmarks/fixtures/openai_smoke_v1/runner_input.jsonl",
+  "prompt_path": "benchmarks/campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/crew_system_prompt_v2.txt",
+  "crew_profile_path": "benchmarks/campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/crew_profile_v2.json",
+  "frozen_domain_evidence_path": "benchmarks/campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/frozen_domain_evidence_v1.json",
+  "response_schema_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/response_schema.json",
+  "decision_policy_path": "benchmarks/campaigns/BUDGET_30H_OPENAI_SMOKE_001/decision_policy.json",
+  "expected_asset_sha256": {
+    "dataset": "1645ea54eacfab59bf618354291f4353607ece23289b7fc952d9450e7ed3c435",
+    "prompt": "49fe9b86bc1a50d2562b00c2752967d2ff589b742ac865b60fa1ace44ce761b1",
+    "crew_profile": "4b074f316d0bdc942d5bffa8862f9a5b62d92be5c9e60c56dfb9cfe462c28623",
+    "frozen_domain_evidence": "ba4db9c35dd14008c65e9e09fdf8ace086610c269c4764fcc7e130e1eba846fc",
+    "response_schema": "e0e2fbfc36bd14cf7e29aef12c9f6829732731cf72790f14a8b02699ececb420",
+    "decision_policy": "d8426b02b41576fe3cc38340ed88c8a63e4662707b6b7bb0343f3f41f5dffb15"
+  },
+  "temperature": 0,
+  "max_output_tokens": 500,
+  "request_timeout_seconds": 120,
+  "max_retries_per_sample": 0,
+  "concurrency": 1,
+  "framework_config": {
+    "process": "sequential",
+    "agent_count": 3,
+    "task_count": 3,
+    "max_llm_calls_per_sample": 3,
+    "max_iter": 1,
+    "agent_max_retry_limit": 0,
+    "task_guardrail_max_retries": 0,
+    "provider_max_retries": 0,
+    "memory": false,
+    "cache": false,
+    "planning": false,
+    "delegation": false,
+    "reasoning_planner": false,
+    "respect_context_window": false,
+    "tracing": false,
+    "anonymous_telemetry": false,
+    "first_run_trace_collection": false,
+    "task_output_storage": "ephemeral_in_memory"
+  },
+  "system_bundle_delta": {
+    "comparison_name": "system_bundle_delta",
+    "same_model_snapshot": true,
+    "same_runner_dataset": true,
+    "same_response_schema": true,
+    "same_decision_policy": true,
+    "same_prompt": false,
+    "additional_components": [
+      "benchmark_specific_role_and_task_prompts",
+      "three_role_sequential_orchestration",
+      "frozen_reserved_domain_evidence"
+    ]
+  },
+  "budget": {
+    "max_attempts": 15,
+    "max_cost_usd": 0.10,
+    "max_wall_seconds": 1800
+  },
+  "pricing_usd_per_million_tokens": {
+    "input": 0.20,
+    "cached_input": 0.02,
+    "output": 1.25,
+    "source_checked_at": "2026-09-01",
+    "source": "https://developers.openai.com/api/docs/models/gpt-5.4-nano"
+  },
+  "security": {
+    "store": false,
+    "tools_enabled": true,
+    "tool_mode": "runner_precomputed_frozen_evidence_only",
+    "live_domain_network": false,
+    "provider_egress": "api.openai.com_only",
+    "crewai_anonymous_telemetry": false,
+    "crewai_first_run_tracing": false,
+    "crewai_task_output_persistence": false,
+    "external_processing_allowed": true,
+    "data_class": "synthetic_reserved_domains_only",
+    "stop_on_critical_event": true
+  }
+}

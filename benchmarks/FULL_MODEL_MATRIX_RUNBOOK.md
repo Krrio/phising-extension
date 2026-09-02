@@ -1,6 +1,6 @@
 # Pełna macierz benchmarków Direct i CrewAI
 
-Stan planu: 2026-09-01. Ten dokument jest operacyjną instrukcją dla czterech
+Stan planu: 2026-09-02. Ten dokument jest operacyjną instrukcją dla czterech
 modeli wskazanych do domknięcia:
 
 - `gpt-5.4-nano-2026-03-17`;
@@ -18,10 +18,10 @@ zamrożonego Direct przez natywne GenerateContent v1.
 
 | Model | Direct `n=5 → n=30` | CrewAI `n=5 → n=30` |
 |---|---|---|
-| GPT-5.4 Nano | wykonane: `READINESS_PASS → PILOT_HOLD` | `_SMOKE_001` nieważny przez błędny klucz; `_SMOKE_002` gotowy; pilot zablokowany |
-| GPT-5.4 Mini | wykonane: `READINESS_PASS → PILOT_HOLD` | smoke gotowy; pilot zablokowany do przejścia smoke |
-| Gemini 3.1 Flash-Lite | wykonane: `READINESS_PASS → PILOT_HOLD` | smoke gotowy; pilot zablokowany do przejścia smoke |
-| Gemini 3.7 Flash | native Direct wykonany: `READINESS_PASS → PILOT_HOLD` (29/30 success) | smoke gotowy; pilot zablokowany do przejścia smoke |
+| GPT-5.4 Nano | wykonane: `READINESS_PASS → PILOT_HOLD` | v1: auth fail `_001`, truncation fail `_002`; wspólny concise-v2 `_003` gotowy; pilot v2 zablokowany |
+| GPT-5.4 Mini | wykonane: `READINESS_PASS → PILOT_HOLD` | v1 zamknięty bez live runu; concise-v2 smoke gotowy; pilot v2 zablokowany |
+| Gemini 3.1 Flash-Lite | wykonane: `READINESS_PASS → PILOT_HOLD` | v1 zamknięty bez live runu; concise-v2 smoke gotowy; pilot v2 zablokowany |
+| Gemini 3.7 Flash | native Direct wykonany: `READINESS_PASS → PILOT_HOLD` (29/30 success) | v1 zamknięty bez live runu; concise-v2 smoke gotowy; pilot v2 zablokowany |
 
 Gemini 3.5 Flash-Lite ma już wykonane oba tory Direct i CrewAI, więc nie jest
 częścią nowych płatnych prób.
@@ -29,6 +29,16 @@ częścią nowych płatnych prób.
 `PILOT_HOLD` w istniejących pilotach oznacza wynik jakości niespełniający co
 najmniej jednej zamrożonej bramki. Nie oznacza błędu technicznego ani powodu do
 automatycznego powtórzenia tych samych danych.
+
+Smoke Nano v1 `_002` wykazał problem protokołu, nie jakości: 9/10 calli
+specjalistów zużyło dokładnie 500 output tokens i zakończyło się `length`, choć
+wszystkie pięć calli orkiestratora miało `stop`. Nie poluzowujemy po fakcie
+bramki kompletności. Wspólny CrewAI concise-v2 ogranicza raport każdego
+specjalisty do jednego akapitu i 600 znaków. Zmiana dotyczy wyłącznie formatu i
+długości raportów pośrednich, została wykonana przed pilotami i obowiązuje
+identycznie Nano, Mini, Gemini 3.1 oraz Gemini 3.7. Limit 500, dane, schema,
+decision policy, trzy role, zero retry i pozostałe zabezpieczenia nie zmieniają
+się. Po smoke Nano v2 nie wolno już stroić tego protokołu między modelami.
 
 ## Co jest identyczne
 
@@ -97,18 +107,32 @@ lub konserwatywnie zarezerwowany koszt całej serii wynosi `2,31591325 USD`.
 Pierwszy smoke CrewAI + GPT-5.4 Nano użył omyłkowo klucza Gemini i zakończył
 się pięcioma odpowiedziami `401 invalid_api_key` przed wykonaniem modelu. Nie
 jest to wynik GPT ani CrewAI. Observed usage i koszt wynoszą zero, lecz przy
-braku usage ledger zachowuje rezerwę `0,0335568 USD`. Identyczny `_SMOKE_002`
-pozostaje w planie z własną rezerwą, dlatego łączny znany lub konserwatywnie
-zarezerwowany koszt serii wynosi teraz `2,34947005 USD`.
+braku usage ledger zachowuje rezerwę `0,0335568 USD`.
+
+Drugi smoke Nano `_SMOKE_002` użył poprawnego klucza i wykonał dokładnie 15/15
+calli bez błędów providera, retry, braków usage ani zdarzeń security. Wszystkie
+pięć workflow zakończyło się jednak `incomplete_output`: 4/5 raportów domenowych
+i 5/5 raportów treściowych miało `finish_reason=length` przy dokładnie 500
+output tokens. Orkiestratory miały `stop`, ale fail-closed gate słusznie nie
+oceniał JSON-u powstałego z uciętego materiału. Observed cost wyniósł
+`0,011212 USD`; lokalny ledger zachował konserwatywny sufit `0,0335568 USD`.
+Run jest zamkniętym `READINESS_FAIL` protokołu v1.
+
+Nowy `_SMOKE_003` ma własny ID oraz wspólny concise-v2 prompt/profile i zachowuje
+własną rezerwę `0,0335568 USD`. Przy planowaniu serii zastępujemy kompletny
+usage `_SMOKE_002` kosztem observed i dodajemy rezerwę `_SMOKE_003`, dlatego
+łączny znany lub konserwatywnie zarezerwowany koszt serii wynosi teraz
+`2,36068205 USD`.
 
 Hard cap to awaryjny sufit, a nie prognoza rachunku. Konserwatywna rezerwa
 zakłada skrajnie niekorzystny token count i maksymalny output każdego calla;
 observed cost z usage i billing providera są właściwym wynikiem kosztowym.
 Pozostały twardy sufit aktywnych kampanii wynosi 3,70 USD. Suma skonfigurowanych
-ceilingów wraz z zakończonymi kampaniami i nieważnym smoke Nano `_001` wynosi
-4,55 USD. Faktyczny koszt dwóch zakończonych kampanii Gemini z kompletnym usage
-to `0,085005 USD`; nieudane próby bez usage zachowują osobne rezerwy:
-`0,008313 USD` dla Gemini 3.7 i `0,0335568 USD` dla Nano CrewAI.
+ceilingów wraz z zakończonymi kampaniami oraz dodatkowymi smoke Nano `_001` i
+`_002` wynosi 4,65 USD. Faktyczny observed cost trzech zakończonych kampanii z
+kompletnym usage to `0,096217 USD`; nieudane próby bez usage zachowują osobne
+rezerwy: `0,008313 USD` dla Gemini 3.7 i `0,0335568 USD` dla pierwszego Nano
+CrewAI.
 
 Każdy pilot ma tylko 30 wiadomości na ramię. Dla pojedynczego modelu komplet
 Direct + CrewAI to 60 ocenianych wiadomości; CrewAI generuje więcej calli, bo
@@ -121,15 +145,16 @@ nowych smoke i pilotów sumują się do 12,5 godziny, więc mieszczą się w lim
 | Tor | Smoke campaign ID | Pilot campaign ID |
 |---|---|---|
 | Gemini 3.7 Native Direct | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002` | `BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001` |
-| CrewAI + GPT-5.4 Nano | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002` | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001` |
-| CrewAI + GPT-5.4 Mini | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001` |
-| CrewAI + Gemini 3.1 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001` |
-| CrewAI + Gemini 3.7 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001` |
+| CrewAI + GPT-5.4 Nano | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003` | `BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002` |
+| CrewAI + GPT-5.4 Mini | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002` | `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002` |
+| CrewAI + Gemini 3.1 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002` |
+| CrewAI + Gemini 3.7 | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002` | `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002` |
 
 Gemini 3.7 Native Direct smoke `_002` i pilot są zakończone oraz zamknięte przed
-ponowieniem. Nano CrewAI `_SMOKE_001` jest również zamknięty jako nieważna próba
-uwierzytelnienia; aktywny jest identyczny `_SMOKE_002`. Cztery aktywne smoke
-CrewAI są gotowe do ręcznie potwierdzonego live runu, a ich piloty mają status
+ponowieniem. Nano CrewAI `_SMOKE_001` i `_SMOKE_002` są zamkniętymi wynikami
+negatywnymi v1. Wszystkie nierunowane ID v1 Mini/Gemini także są programowo
+zamknięte, aby nie mieszać protokołów. Cztery aktywne smoke concise-v2 są gotowe
+do ręcznie potwierdzonego live runu, a odpowiadające im piloty v2 mają status
 `LIVE_BLOCKED`, dopóki własny smoke nie uzyska audytowanego `READINESS_PASS`.
 
 ## Etap 0 — czysty commit i kontrola bez kosztu
@@ -143,10 +168,10 @@ env -u OPENAI_API_KEY -u GEMINI_API_KEY PYTHONWARNINGS=ignore \
   backend/guardian/.venv/bin/python -m unittest discover -s benchmarks/tests -q
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate \
-  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003/runtime_config.json
 
 backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py run \
-  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/runtime_config.json
+  --campaign benchmarks/campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003/runtime_config.json
 ```
 
 Ostatnia komenda jest dry-runem. Bez `--live` nie wykonuje requestu.
@@ -162,7 +187,7 @@ albo `sk-…` jako Gemini), ale operator nadal odpowiada za użycie właściwego
 aktywnego klucza i jego rotację po ekspozycji.
 
 ```bash
-CAMPAIGN_ID="BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002"
+CAMPAIGN_ID="BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003"
 CONFIG="benchmarks/campaigns/$CAMPAIGN_ID/runtime_config.json"
 
 read -s OPENAI_API_KEY
@@ -196,9 +221,9 @@ Kolejne smoke uruchamiaj tą samą procedurą, jeden po drugim. Dla OpenAI użyj
 
 Rekomendowana kolejność po CrewAI + GPT-5.4 Nano:
 
-1. `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001`;
-2. `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001`;
-3. `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001`.
+1. `BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002`;
+2. `BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002`;
+3. `BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002`.
 
 Dla każdego ID ustaw:
 

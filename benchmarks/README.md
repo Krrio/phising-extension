@@ -33,10 +33,19 @@ oraz brakujące pary CrewAI dla GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini
 zamknięte przed ponowieniem. Pierwszy smoke CrewAI + GPT-5.4 Nano (`_001`)
 zakończył się pięcioma błędami `401`, ponieważ do zmiennej `OPENAI_API_KEY`
 omyłkowo wczytano klucz Gemini. Nie jest to wynik modelu ani frameworka;
-kampania jest zamknięta, a identyczny, osobno wersjonowany `_002` czeka na
-prawidłowy klucz OpenAI. Pozostałe nowe smoke CrewAI są gotowe, a ich piloty
-pozostają `LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny stan,
-budżet i komendy zawiera
+kampania jest zamknięta. `_002` użył poprawnego klucza i wykonał 15/15 calli,
+ale zakończył się `READINESS_FAIL`, ponieważ 9/10 raportów specjalistów doszło
+do dokładnego limitu 500 tokenów z `finish_reason=length`; observed cost wyniósł
+`0,011212 USD`. Wszystkich pięć orkiestratorów miało `stop`, lecz fail-closed
+gate nie akceptuje decyzji opartej na uciętym materiale.
+
+Engineering smoke uzasadnił wspólny concise-v2 prompt/profile: jeden akapit i
+maksymalnie 600 znaków dla raportu specjalisty, bez zmiany limitu 500 tokenów,
+danych, schema, decision policy, liczby ról ani retry. V2 ma osobne campaign IDs
+i obowiązuje identycznie GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini 3.7.
+Stare ID v1 są zamknięte; nowe smoke są gotowe, a ich piloty pozostają
+`LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny stan, budżet i
+komendy zawiera
 [`FULL_MODEL_MATRIX_RUNBOOK.md`](FULL_MODEL_MATRIX_RUNBOOK.md).
 
 Pilot natywnego Direct Gemini 3.7 zakończył 30/30 rekordów i 30 attempts bez
@@ -135,7 +144,10 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_001/` | pierwotny pilot 45 s; programowo `LIVE_BLOCKED`, nie uruchamiać |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, 90 calli, koszt `0,0656925 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001/` | zachowany `READINESS_FAIL`: 5/5 błędów uwierzytelnienia po użyciu klucza Gemini wobec OpenAI, bez wyniku modelu; nie uruchamiać ponownie |
-| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/` | identyczny, osobno zamrożony retry po korekcie uwierzytelnienia; wymaga prawidłowego `OPENAI_API_KEY` |
+| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002/` | zachowany `READINESS_FAIL`: 15/15 calli, lecz 9/10 raportów specjalistów zakończonych `length`; koszt `0,011212 USD`; nie uruchamiać ponownie |
+| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003/` | aktywny smoke wspólnego concise-v2; nadal 500 tokenów, zero retry i 15 calli |
+| `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/{crew_system_prompt_v2.txt,crew_profile_v2.json}` | wspólny, zamrożony kontrakt krótkich raportów specjalistów dla czterech nowych ramion CrewAI |
+| `campaigns/BUDGET_30H_CREWAI_{OPENAI,GOOGLE}_*/` | nowe concise-v2 smoke/pilot mają osobne ID; smoke są aktywne, piloty programowo zablokowane do własnej bramki |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
 | `phishing_bench/gemini_direct.py` | bezpośrednie transporty Gemini Interactions i natywnego GenerateContent z izolacją sieci, jawnymi kontraktami, limitem odpowiedzi i bezpiecznym parsowaniem usage |

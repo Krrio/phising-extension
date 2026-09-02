@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, str(BENCHMARKS_DIR))
 
 from phishing_bench.contracts import (  # noqa: E402
+    CREWAI_CONCISE_V2_CAMPAIGN_IDS,
     CREWAI_GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
     CREWAI_GEMINI31_FLASH_LITE_SMOKE_PROFILE,
     CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
@@ -51,8 +52,8 @@ MATRIX = {
             config("BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001"),
         ),
         "crew": (
-            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002"),
-            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001"),
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003"),
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002"),
         ),
     },
     "gpt54_mini": {
@@ -65,8 +66,8 @@ MATRIX = {
             config("BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001"),
         ),
         "crew": (
-            config("BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001"),
-            config("BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001"),
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002"),
+            config("BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002"),
         ),
     },
     "gemini31": {
@@ -79,8 +80,8 @@ MATRIX = {
             config("BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_PILOT_030_001"),
         ),
         "crew": (
-            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001"),
-            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001"),
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002"),
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002"),
         ),
     },
     "gemini37": {
@@ -93,11 +94,58 @@ MATRIX = {
             config("BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001"),
         ),
         "crew": (
-            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001"),
-            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001"),
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002"),
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002"),
         ),
     },
 }
+
+SUPERSEDED_OR_COMPLETED_V1 = (
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001",
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002",
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001",
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001",
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001",
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001",
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001",
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001",
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001",
+)
+
+V1_TO_CONCISE_V2_PAIRS = (
+    (
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003",
+    ),
+    (
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002",
+    ),
+    (
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002",
+    ),
+    (
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002",
+    ),
+    (
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002",
+    ),
+    (
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002",
+    ),
+    (
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
+    ),
+    (
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+    ),
+)
 
 
 class FullCrewAIModelMatrixContractTests(unittest.TestCase):
@@ -117,6 +165,8 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
 
     def test_every_model_has_matching_direct_and_crewai_smoke_and_pilot_assets(self) -> None:
         framework_profiles = []
+        crew_prompts = []
+        crew_profiles = []
         for name, row in MATRIX.items():
             with self.subTest(model=name):
                 expected_profiles = row["profiles"]
@@ -166,18 +216,54 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                             crew["system_bundle_delta"]["same_provider_api"]
                         )
                     framework_profiles.append(crew["framework_config"])
+                    crew_prompts.append(crew_assets["prompt"])
+                    crew_profiles.append(crew_assets["crew_profile"])
 
         self.assertTrue(
             all(value == framework_profiles[0] for value in framework_profiles[1:])
         )
+        self.assertTrue(all(value == crew_prompts[0] for value in crew_prompts[1:]))
+        self.assertTrue(
+            all(value == crew_profiles[0] for value in crew_profiles[1:])
+        )
+        self.assertEqual(
+            crew_profiles[0]["profile_id"],
+            "guardian_crewai_offline_v2_concise_specialists",
+        )
+        self.assertIn("najwyżej 600 znaków", str(crew_profiles[0]))
 
     def test_only_smokes_are_live_ready_before_their_own_gate_passes(self) -> None:
+        matrix_campaign_ids = set()
         for name, row in MATRIX.items():
             with self.subTest(model=name):
                 smoke, _ = load_and_validate_campaign(row["crew"][0], REPO_ROOT)
                 pilot, _ = load_and_validate_campaign(row["crew"][1], REPO_ROOT)
+                matrix_campaign_ids.update((smoke["campaign_id"], pilot["campaign_id"]))
                 self.assertIsNone(campaign_live_block_reason(smoke))
                 self.assertIn("prerequisite", campaign_live_block_reason(pilot) or "")
+        self.assertEqual(matrix_campaign_ids, set(CREWAI_CONCISE_V2_CAMPAIGN_IDS))
+
+    def test_v1_matrix_campaigns_cannot_be_mixed_with_concise_v2(self) -> None:
+        for campaign_id in SUPERSEDED_OR_COMPLETED_V1:
+            with self.subTest(campaign_id=campaign_id):
+                config_value, _ = load_and_validate_campaign(
+                    config(campaign_id), REPO_ROOT
+                )
+                self.assertIsNotNone(campaign_live_block_reason(config_value))
+
+    def test_concise_v2_changes_only_versioned_prompt_and_profile_assets(self) -> None:
+        for v1_id, v2_id in V1_TO_CONCISE_V2_PAIRS:
+            with self.subTest(v2_id=v2_id):
+                v1 = read_json(config(v1_id))
+                v2 = read_json(config(v2_id))
+                for value in (v1, v2):
+                    value.pop("campaign_id")
+                    value.pop("config_id")
+                    value.pop("prompt_path")
+                    value.pop("crew_profile_path")
+                    value["expected_asset_sha256"].pop("prompt")
+                    value["expected_asset_sha256"].pop("crew_profile")
+                self.assertEqual(v2, v1)
 
     def test_scoring_bundles_accept_the_complete_new_matrix(self) -> None:
         smoke_manifest = read_json(SCORING / "openai_smoke_v1" / "scoring_manifest.json")

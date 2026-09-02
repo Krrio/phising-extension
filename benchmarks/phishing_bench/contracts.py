@@ -185,9 +185,25 @@ CREWAI_CHALLENGER_VARIANTS = {
         0.10,
         1800,
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003": (
+        CREWAI_GPT54_NANO_SMOKE_PROFILE,
+        "crewai-offline__openai__gpt-5.4-nano-2026-03-17__crew-v2-concise-specialists__reasoning-none__smoke005__timeout120__no-retry-v3",
+        120,
+        15,
+        0.10,
+        1800,
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001": (
         CREWAI_GPT54_NANO_QUALITY_PILOT_PROFILE,
         "crewai-offline__openai__gpt-5.4-nano-2026-03-17__crew-v1__reasoning-none__pilot030__timeout120__no-retry-v1",
+        120,
+        90,
+        0.50,
+        7200,
+    ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002": (
+        CREWAI_GPT54_NANO_QUALITY_PILOT_PROFILE,
+        "crewai-offline__openai__gpt-5.4-nano-2026-03-17__crew-v2-concise-specialists__reasoning-none__pilot030__timeout120__no-retry-v2",
         120,
         90,
         0.50,
@@ -201,9 +217,25 @@ CREWAI_CHALLENGER_VARIANTS = {
         0.25,
         1800,
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002": (
+        CREWAI_GPT54_MINI_SMOKE_PROFILE,
+        "crewai-offline__openai__gpt-5.4-mini-2026-03-17__crew-v2-concise-specialists__reasoning-none__smoke005__timeout120__no-retry-v2",
+        120,
+        15,
+        0.25,
+        1800,
+    ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001": (
         CREWAI_GPT54_MINI_QUALITY_PILOT_PROFILE,
         "crewai-offline__openai__gpt-5.4-mini-2026-03-17__crew-v1__reasoning-none__pilot030__timeout120__no-retry-v1",
+        120,
+        90,
+        1.00,
+        7200,
+    ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002": (
+        CREWAI_GPT54_MINI_QUALITY_PILOT_PROFILE,
+        "crewai-offline__openai__gpt-5.4-mini-2026-03-17__crew-v2-concise-specialists__reasoning-none__pilot030__timeout120__no-retry-v2",
         120,
         90,
         1.00,
@@ -217,9 +249,25 @@ CREWAI_CHALLENGER_VARIANTS = {
         0.10,
         1800,
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002": (
+        CREWAI_GEMINI31_FLASH_LITE_SMOKE_PROFILE,
+        "crewai-offline__google-native__gemini-3.1-flash-lite__crew-v2-concise-specialists__thinking-minimal__smoke005__timeout120__transient-fail-fast__no-retry-v2",
+        120,
+        15,
+        0.10,
+        1800,
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001": (
         CREWAI_GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
         "crewai-offline__google-native__gemini-3.1-flash-lite__crew-v1__thinking-minimal__pilot030__timeout120__transient-fail-fast__no-retry-v1",
+        120,
+        90,
+        0.50,
+        7200,
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002": (
+        CREWAI_GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
+        "crewai-offline__google-native__gemini-3.1-flash-lite__crew-v2-concise-specialists__thinking-minimal__pilot030__timeout120__transient-fail-fast__no-retry-v2",
         120,
         90,
         0.50,
@@ -233,6 +281,14 @@ CREWAI_CHALLENGER_VARIANTS = {
         0.25,
         1800,
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002": (
+        CREWAI_GEMINI37_FLASH_SMOKE_PROFILE,
+        "crewai-offline__google-native__gemini-3.7-flash__crew-v2-concise-specialists__thinking-low__smoke005__timeout120__transient-fail-fast__no-retry-v2",
+        120,
+        15,
+        0.25,
+        1800,
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001": (
         CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
         "crewai-offline__google-native__gemini-3.7-flash__crew-v1__thinking-low__pilot030__timeout120__transient-fail-fast__no-retry-v1",
@@ -241,15 +297,39 @@ CREWAI_CHALLENGER_VARIANTS = {
         1.00,
         7200,
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002": (
+        CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
+        "crewai-offline__google-native__gemini-3.7-flash__crew-v2-concise-specialists__thinking-low__pilot030__timeout120__transient-fail-fast__no-retry-v2",
+        120,
+        90,
+        1.00,
+        7200,
+    ),
 }
+CREWAI_CONCISE_V2_CAMPAIGN_IDS = frozenset(
+    {
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+    }
+)
 CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS = frozenset(
     {
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_SMOKE_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI35_FLASH_LITE_OFFLINE_PILOT_030_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
     }
 )
 LIVE_BLOCKED_CAMPAIGNS = {
@@ -302,24 +382,57 @@ LIVE_BLOCKED_CAMPAIGNS = {
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001": (
         "closed after the recorded 5/5 authentication failures caused by a "
-        "Gemini credential being supplied to the OpenAI endpoint; use the "
-        "separately frozen SMOKE_002 with an OpenAI API key"
+        "Gemini credential being supplied to the OpenAI endpoint; SMOKE_002 "
+        "then exposed specialist truncation, so use the shared concise-v2 "
+        "SMOKE_003"
+    ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002": (
+        "closed after the recorded 5/5 incomplete_output result caused by "
+        "specialist calls reaching the 500-token limit in run BUDGET_30H_"
+        "CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002__20260901T212255Z__"
+        "43eb0248; preserve the v1 result and use shared concise-v2 SMOKE_003"
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001": (
-        "prerequisite CrewAI GPT-5.4 nano SMOKE_002 has not yet produced an "
-        "audited READINESS_PASS"
+        "obsolete CrewAI v1 pilot after Nano SMOKE_002 exposed deterministic "
+        "specialist truncation; use concise-v2 PILOT_030_002 only after "
+        "SMOKE_003 passes"
+    ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002": (
+        "prerequisite CrewAI GPT-5.4 Nano concise-v2 SMOKE_003 has not yet "
+        "produced an audited READINESS_PASS"
+    ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_001": (
+        "unrun CrewAI v1 campaign superseded before live execution by the "
+        "shared concise-v2 matrix protocol; use SMOKE_002"
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001": (
-        "prerequisite CrewAI GPT-5.4 Mini SMOKE_001 has not yet produced an "
-        "audited READINESS_PASS"
+        "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
+    ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002": (
+        "prerequisite CrewAI GPT-5.4 Mini concise-v2 SMOKE_002 has not yet "
+        "produced an audited READINESS_PASS"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001": (
+        "unrun CrewAI v1 campaign superseded before live execution by the "
+        "shared concise-v2 matrix protocol; use SMOKE_002"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001": (
-        "prerequisite CrewAI Gemini 3.1 SMOKE_001 has not yet produced an "
-        "audited READINESS_PASS"
+        "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002": (
+        "prerequisite CrewAI Gemini 3.1 concise-v2 SMOKE_002 has not yet "
+        "produced an audited READINESS_PASS"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001": (
+        "unrun CrewAI v1 campaign superseded before live execution by the "
+        "shared concise-v2 matrix protocol; use SMOKE_002"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001": (
-        "prerequisite CrewAI Gemini 3.7 SMOKE_001 has not yet produced an "
-        "audited READINESS_PASS"
+        "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002": (
+        "prerequisite CrewAI Gemini 3.7 concise-v2 SMOKE_002 has not yet "
+        "produced an audited READINESS_PASS"
     ),
 }
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"
@@ -1844,9 +1957,14 @@ def load_and_validate_campaign(config_path: Path, repo_root: Path) -> tuple[dict
             "execution_contract",
         }:
             raise ContractError("CrewAI profile fields do not match the frozen contract")
+        expected_profile_id = (
+            "guardian_crewai_offline_v2_concise_specialists"
+            if config["campaign_id"] in CREWAI_CONCISE_V2_CAMPAIGN_IDS
+            else "guardian_crewai_offline_v1"
+        )
         if (
             loaded_crew_profile["schema_version"] != "1.0"
-            or loaded_crew_profile["profile_id"] != "guardian_crewai_offline_v1"
+            or loaded_crew_profile["profile_id"] != expected_profile_id
             or loaded_crew_profile["execution_contract"] != config["framework_config"]
             or tuple(loaded_crew_profile["agents"])
             != ("domain_analyst", "content_analyst", "orchestrator")

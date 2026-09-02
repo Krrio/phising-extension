@@ -47,17 +47,32 @@ CREW_GEMINI31_SMOKE_ID = (
 CREW_GEMINI31_PILOT_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001"
 )
+CREW_GEMINI31_SMOKE_002_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002"
+)
+CREW_GEMINI31_PILOT_002_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002"
+)
 CREW_GEMINI37_SMOKE_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001"
 )
 CREW_GEMINI37_PILOT_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001"
 )
+CREW_GEMINI37_SMOKE_002_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002"
+)
+CREW_GEMINI37_PILOT_002_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002"
+)
 CREW_GPT54_NANO_SMOKE_001_ID = (
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001"
 )
 CREW_GPT54_NANO_SMOKE_002_ID = (
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_002"
+)
+CREW_GPT54_NANO_SMOKE_003_ID = (
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003"
 )
 G37_PILOT_CONFIG = (
     BENCHMARKS_DIR / "campaigns" / G37_PILOT_ID / "runtime_config.json"
@@ -95,6 +110,12 @@ CREW_GPT54_NANO_SMOKE_002_CONFIG = (
     / CREW_GPT54_NANO_SMOKE_002_ID
     / "runtime_config.json"
 )
+CREW_GPT54_NANO_SMOKE_003_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GPT54_NANO_SMOKE_003_ID
+    / "runtime_config.json"
+)
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
 FAKE_KEY = "gemini_FAKE_live_guard_secret_123456"
 
@@ -115,8 +136,12 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                     CREW_GEMINI_PILOT_002_ID,
                     CREW_GEMINI31_SMOKE_ID,
                     CREW_GEMINI31_PILOT_ID,
+                    CREW_GEMINI31_SMOKE_002_ID,
+                    CREW_GEMINI31_PILOT_002_ID,
                     CREW_GEMINI37_SMOKE_ID,
                     CREW_GEMINI37_PILOT_ID,
+                    CREW_GEMINI37_SMOKE_002_ID,
+                    CREW_GEMINI37_PILOT_002_ID,
                 }
             ),
         )
@@ -200,6 +225,7 @@ class ClosedCampaignGuardTests(unittest.TestCase):
             (CREW_GEMINI_PILOT_ID, CREW_GEMINI_PILOT_CONFIG),
             (CREW_GEMINI_PILOT_002_ID, CREW_GEMINI_PILOT_002_CONFIG),
             (CREW_GPT54_NANO_SMOKE_001_ID, CREW_GPT54_NANO_SMOKE_001_CONFIG),
+            (CREW_GPT54_NANO_SMOKE_002_ID, CREW_GPT54_NANO_SMOKE_002_CONFIG),
         ):
             with self.subTest(campaign_id=campaign_id):
                 stderr = io.StringIO()
@@ -237,10 +263,10 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 [
                     "run",
                     "--campaign",
-                    str(CREW_GPT54_NANO_SMOKE_002_CONFIG),
+                    str(CREW_GPT54_NANO_SMOKE_003_CONFIG),
                     "--live",
                     "--confirm-campaign",
-                    CREW_GPT54_NANO_SMOKE_002_ID,
+                    CREW_GPT54_NANO_SMOKE_003_ID,
                 ]
             )
 
