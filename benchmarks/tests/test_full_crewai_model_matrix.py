@@ -294,7 +294,9 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                     self.assertIn(
                         "4edc9af3", campaign_live_block_reason(smoke) or ""
                     )
-                    self.assertIsNone(campaign_live_block_reason(pilot))
+                    self.assertIn(
+                        "f345115d", campaign_live_block_reason(pilot) or ""
+                    )
         self.assertEqual(
             matrix_campaign_ids,
             set(CREWAI_CURRENT_MODEL_MATRIX_CAMPAIGN_IDS),

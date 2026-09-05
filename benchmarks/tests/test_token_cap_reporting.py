@@ -145,6 +145,8 @@ class TokenCapReportingTests(unittest.TestCase):
             "variant_id": "direct",
             "adapter": "gemini_generate_content",
             "requested_model": "gemini-3.7-flash",
+            "success_count": 30,
+            "technical_failures": 0,
             "tp": 15,
             "fp": 1,
             "tn": 14,
@@ -155,6 +157,7 @@ class TokenCapReportingTests(unittest.TestCase):
             "false_positive_rate": 0.066667,
             "observed_cost_usd": 0.01,
             "latency_median_ms": 1000,
+            "campaign_status": "PILOT_HOLD",
         }
         report = _render_report(
             run_rows=[run_row],
@@ -163,6 +166,7 @@ class TokenCapReportingTests(unittest.TestCase):
         )
         self.assertIn(TOKEN_CAP_ADJUSTED_COMPARISON_TYPE, report)
         self.assertIn("token-cap-adjusted system bundle", report)
+        self.assertIn("dla ramienia `crew`", report)
         self.assertIn("Direct=500", report)
         self.assertIn("CrewAI=1000", report)
         self.assertIn("nie jest apples-to-apples", report)
@@ -184,6 +188,7 @@ class TokenCapReportingTests(unittest.TestCase):
         )
 
         self.assertIn("token-cap-adjusted system bundle", report)
+        self.assertIn("dla ramienia `crew`", report)
         self.assertIn("Direct=500", report)
         self.assertIn("CrewAI=1000", report)
 

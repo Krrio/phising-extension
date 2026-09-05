@@ -346,10 +346,13 @@ def _load_run(
     manifest = _require_mapping(
         read_json(run_dir / "run_manifest.json"), "run manifest"
     )
-    if manifest.get("status") != "completed" or not isinstance(
-        manifest.get("finished_at"), str
-    ):
-        raise ContractError("comparison requires a completed run manifest")
+    if manifest.get("status") not in {
+        "completed",
+        "completed_with_failures",
+    } or not isinstance(manifest.get("finished_at"), str):
+        raise ContractError(
+            "comparison requires a completed or completed-with-failures run manifest"
+        )
     results = _load_results(run_dir)
     _validate_run_integrity(manifest, results, run_dir)
     _validate_scoring_bundle(
@@ -897,8 +900,8 @@ def _render_report(
     compatibility: dict[str, Any],
 ) -> str:
     table_lines = [
-        "| Wariant | Adapter | Model | TP | FP | TN | FN | Precision | Recall | F1 | FPR | Koszt USD | Mediana ms |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Wariant | Adapter | Model | Sukcesy | Błędy techniczne | TP | FP | TN | FN | Precision | Recall | F1 | FPR | Koszt USD | Mediana ms | Status |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for row in run_rows:
         table_lines.append(
@@ -909,6 +912,8 @@ def _render_report(
                     "variant_id",
                     "adapter",
                     "requested_model",
+                    "success_count",
+                    "technical_failures",
                     "tp",
                     "fp",
                     "tn",
@@ -919,6 +924,7 @@ def _render_report(
                     "false_positive_rate",
                     "observed_cost_usd",
                     "latency_median_ms",
+                    "campaign_status",
                 )
             )
             + " |"
@@ -941,7 +947,8 @@ def _render_report(
     if adjustments:
         adjustment = adjustments[0] if adjustments else {}
         token_cap_note = (
-            "\n\nTo jest token-cap-adjusted system bundle: "
+            "\n\nTo jest token-cap-adjusted system bundle dla ramienia "
+            f"`{_md(adjustment.get('variant_id'))}`: "
             f"`max_output_tokens` Direct={_md(adjustment.get('direct_max_output_tokens'))}, "
             f"CrewAI={_md(adjustment.get('crewai_max_output_tokens'))}. "
             "Porównanie nie jest apples-to-apples ani czystą deltą frameworka; "

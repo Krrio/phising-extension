@@ -70,9 +70,15 @@ def _model_output(verdict: str) -> dict[str, Any]:
 
 
 class FakeComparisonTransport:
-    def __init__(self, plans: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        plans: list[dict[str, Any]],
+        *,
+        incomplete_calls: set[int] | None = None,
+    ) -> None:
         self.plans = list(plans)
         self.calls = 0
+        self.incomplete_calls = set(incomplete_calls or set())
 
     def call(
         self,
@@ -90,7 +96,9 @@ class FakeComparisonTransport:
             requested_model=body["model"],
             resolved_model=body["model"],
             content=content,
-            finish_reason="stop",
+            finish_reason=(
+                "length" if self.calls in self.incomplete_calls else "stop"
+            ),
             refusal=None,
             tool_calls_present=False,
             usage={
@@ -261,6 +269,62 @@ class ComparisonExportTests(unittest.TestCase):
 
         self.assertEqual(before["left"], self._source_hashes(self.left_run))
         self.assertEqual(before["right"], self._source_hashes(self.right_run))
+
+    def test_completed_with_failures_run_remains_comparable(self) -> None:
+        transport = FakeComparisonTransport(
+            [_model_output("safe") for _ in range(31)],
+            incomplete_calls={1, 2},
+        )
+        failed_run = run_campaign(
+            config_path=CONFIG_PATH,
+            repo_root=REPO_ROOT,
+            output_root=self.case_dir / "failed-runs",
+            api_key=FAKE_KEY,
+            transport=transport,
+            sleep=lambda _: None,
+        )
+        score_run(
+            run_dir=failed_run,
+            labels_path=LABELS_PATH,
+            output_dir=None,
+            repo_root=REPO_ROOT,
+        )
+
+        self.assertEqual(
+            read_json(failed_run / "run_manifest.json")["status"],
+            "completed_with_failures",
+        )
+        output_dir = self._compare(
+            failed_run,
+            output_name="completed-with-failures",
+        )
+        comparison = read_json(output_dir / "comparison.json")
+        candidate = next(
+            row for row in comparison["runs"] if row["variant_id"] == "candidate"
+        )
+        self.assertEqual(candidate["sample_count"], 30)
+        self.assertEqual(candidate["success_count"], 29)
+        self.assertEqual(candidate["technical_failures"], 1)
+        report = (output_dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn("Błędy techniczne", report)
+        self.assertIn("PILOT_HOLD", report)
+
+    def test_unfinished_invalid_and_security_failed_runs_are_not_comparable(self) -> None:
+        for status in ("created", "running", "invalid", "security_fail"):
+            with self.subTest(status=status):
+                run_dir = self._copy_run(self.right_run, f"manifest-{status}")
+                manifest_path = run_dir / "run_manifest.json"
+                manifest = read_json(manifest_path)
+                manifest["status"] = status
+                atomic_write_json(manifest_path, manifest)
+                with self.assertRaisesRegex(
+                    ContractError,
+                    "completed or completed-with-failures",
+                ):
+                    self._compare(
+                        run_dir,
+                        output_name=f"out-manifest-{status}",
+                    )
 
     def test_pairwise_math_matches_known_direct_vs_crew_shape(self) -> None:
         comparison = read_json(self._compare() / "comparison.json")

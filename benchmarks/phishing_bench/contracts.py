@@ -364,6 +364,40 @@ CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS = frozenset(
     }
 )
 LIVE_BLOCKED_CAMPAIGNS = {
+    "BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001": (
+        "closed after the recorded 5/5 successful GPT-5.4 Nano Direct smoke "
+        "BUDGET_30H_OPENAI_GPT54_NANO_SMOKE_001__20260828T092701Z__3d3800b4; "
+        "preserve the READINESS_PASS prerequisite for the completed pilot"
+    ),
+    "BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001": (
+        "closed after the recorded 30/30 technically successful GPT-5.4 Nano "
+        "Direct pilot BUDGET_30H_OPENAI_GPT54_NANO_PILOT_030_001"
+        "__20260828T093323Z__823da122; preserve the PILOT_HOLD result with "
+        "TP=15, FP=11, TN=4, FN=0 and do not rerun the frozen set"
+    ),
+    "BUDGET_30H_OPENAI_GPT54_MINI_SMOKE_001": (
+        "closed after the recorded 5/5 successful GPT-5.4 Mini Direct smoke "
+        "BUDGET_30H_OPENAI_GPT54_MINI_SMOKE_001__20260829T074525Z__9f079eaa; "
+        "preserve the READINESS_PASS prerequisite for the completed pilot"
+    ),
+    "BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001": (
+        "closed after the recorded 30/30 technically successful GPT-5.4 Mini "
+        "Direct pilot BUDGET_30H_OPENAI_GPT54_MINI_PILOT_030_001"
+        "__20260829T074842Z__c4257a16; preserve the PILOT_HOLD result with "
+        "TP=15, FP=1, TN=14, FN=0 and do not rerun the frozen set"
+    ),
+    "BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_SMOKE_001": (
+        "closed after the recorded 5/5 successful Gemini 3.1 Flash-Lite Direct "
+        "smoke BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_SMOKE_001"
+        "__20260831T091337Z__52b12b7b; preserve the READINESS_PASS prerequisite "
+        "for the completed pilot"
+    ),
+    "BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_PILOT_030_001": (
+        "closed after the recorded 30/30 technically successful Gemini 3.1 "
+        "Flash-Lite Direct pilot BUDGET_30H_GOOGLE_GEMINI31_FLASH_LITE_"
+        "PILOT_030_001__20260831T100549Z__e0e9e283; preserve the PILOT_HOLD "
+        "result with TP=15, FP=3, TN=12, FN=0 and do not rerun the frozen set"
+    ),
     "BUDGET_30H_GOOGLE_GEMINI37_FLASH_SMOKE_001": (
         "closed after the recorded 10/10 timeout result; preserve the failed "
         "Interactions smoke"
@@ -384,7 +418,8 @@ LIVE_BLOCKED_CAMPAIGNS = {
     "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002": (
         "closed after the recorded 5/5 successful native GenerateContent "
         "smoke BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002"
-        "__20260901T161107Z__67004817; use the unlocked pilot"
+        "__20260901T161107Z__67004817; preserve this prerequisite for the "
+        "completed native pilot"
     ),
     "BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001": (
         "closed after the recorded 29/30 success plus one incomplete_output "
@@ -427,8 +462,8 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "closed after the audited 5/5 successful concise-v2 smoke with "
         "15/15 calls ending in stop, zero technical or security failures, "
         "and complete usage in run BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_"
-        "OFFLINE_SMOKE_003__20260902T070059Z__64067e56; use the unlocked "
-        "concise-v2 pilot"
+        "OFFLINE_SMOKE_003__20260902T070059Z__64067e56; preserve this "
+        "prerequisite for the completed concise-v2 pilot"
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_001": (
         "obsolete CrewAI v1 pilot after Nano SMOKE_002 exposed deterministic "
@@ -449,8 +484,8 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "closed after the audited 5/5 successful concise-v2 smoke with "
         "15/15 calls ending in stop, zero technical or security failures, "
         "and complete usage in run BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_"
-        "OFFLINE_SMOKE_002__20260902T080859Z__f469a51c; use the unlocked "
-        "concise-v2 pilot"
+        "OFFLINE_SMOKE_002__20260902T080859Z__f469a51c; preserve this "
+        "prerequisite for the completed concise-v2 pilot"
     ),
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001": (
         "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
@@ -469,8 +504,8 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "closed after the audited 5/5 successful concise-v2 smoke with "
         "15/15 calls ending in stop, zero technical or security failures, "
         "and complete usage in run BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_"
-        "LITE_OFFLINE_SMOKE_002__20260902T074313Z__57ccf719; use the unlocked "
-        "concise-v2 pilot"
+        "LITE_OFFLINE_SMOKE_002__20260902T074313Z__57ccf719; preserve this "
+        "prerequisite for the completed concise-v2 pilot"
     ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001": (
         "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
@@ -505,7 +540,13 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "with 15/15 calls ending in stop, zero technical or security failures, "
         "complete usage, and golden actions 5/5 in run BUDGET_30H_CREWAI_"
         "GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003__20260905T133129Z__4edc9af3; "
-        "use the unlocked max-output1000 PILOT_030_003"
+        "preserve this prerequisite for the completed max-output1000 pilot"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003": (
+        "closed after the audited 30/30 technically successful max-output1000 "
+        "quality pilot BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_"
+        "PILOT_030_003__20260905T134533Z__f345115d; preserve the PILOT_HOLD "
+        "result with TP=15, FP=1, TN=14, FN=0 and do not rerun the frozen set"
     ),
 }
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"
