@@ -500,9 +500,12 @@ LIVE_BLOCKED_CAMPAIGNS = {
         "three specialist calls reached the 500-token output limit; use the "
         "isolated max-output1000 PILOT_030_003 only after SMOKE_003 passes"
     ),
-    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003": (
-        "prerequisite CrewAI Gemini 3.7 max-output1000 SMOKE_003 has not yet "
-        "produced an audited READINESS_PASS"
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003": (
+        "closed after the audited 5/5 successful max-output1000 recovery smoke "
+        "with 15/15 calls ending in stop, zero technical or security failures, "
+        "complete usage, and golden actions 5/5 in run BUDGET_30H_CREWAI_"
+        "GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003__20260905T133129Z__4edc9af3; "
+        "use the unlocked max-output1000 PILOT_030_003"
     ),
 }
 GPT54_REASONING_NONE_REQUEST_PROFILE = "chat_completions_gpt54_reasoning_none_v1"

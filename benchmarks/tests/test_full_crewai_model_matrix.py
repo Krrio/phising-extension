@@ -291,10 +291,10 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                         "d4383f53", campaign_live_block_reason(pilot) or ""
                     )
                 else:
-                    self.assertIsNone(campaign_live_block_reason(smoke))
                     self.assertIn(
-                        "SMOKE_003", campaign_live_block_reason(pilot) or ""
+                        "4edc9af3", campaign_live_block_reason(smoke) or ""
                     )
+                    self.assertIsNone(campaign_live_block_reason(pilot))
         self.assertEqual(
             matrix_campaign_ids,
             set(CREWAI_CURRENT_MODEL_MATRIX_CAMPAIGN_IDS),
