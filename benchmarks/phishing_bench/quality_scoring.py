@@ -31,9 +31,12 @@ from .io_utils import (
 )
 from .scoring import (
     CRITICAL_SECURITY_EVENT_TYPES,
+    _comparison_scope_type,
     _execution_observability,
     _fixed_float,
     _load_results,
+    _token_cap_adjusted_bundle_note,
+    _token_cap_adjustment,
     _validate_run_integrity,
 )
 
@@ -672,6 +675,7 @@ def score_quality_run(
     language_counts = Counter(label["language"] for label in labels)
     confidence_counts = Counter(label["label_confidence"] for label in labels)
     cluster_counts = Counter(label["analysis_cluster_id"] for label in labels)
+    runtime_config = manifest.get("runtime_config", {})
     metrics = {
         "schema_version": "1.0",
         "scoring_profile": QUALITY_SCORING_PROFILE,
@@ -689,9 +693,12 @@ def score_quality_run(
             else "openai_direct"
         ),
         "comparison_scope": (
-            manifest.get("runtime_config", {}).get("system_bundle_delta")
+            runtime_config.get("system_bundle_delta")
             if is_crewai
             else None
+        ),
+        "comparison_scope_type": (
+            _comparison_scope_type(runtime_config) if is_crewai else None
         ),
         "disclaimer": (
             "Pilot n=30 używa wyłącznie danych syntetycznych i challenge-enriched. "
@@ -802,6 +809,7 @@ def score_quality_run(
     csv_rows = [
         ("campaign_status", campaign_status),
         ("comparative_conclusion", "INCONCLUSIVE"),
+        ("comparison_scope_type", metrics["comparison_scope_type"]),
         ("records_expected", expected_count),
         ("records_received", len(results)),
         ("technical_failures", technical_failure_count),
@@ -846,13 +854,14 @@ def score_quality_run(
     status_summary = ", ".join(
         f"{status}={count}" for status, count in sorted(status_counts.items())
     ) or "brak"
-    report_config = manifest.get("runtime_config", {})
+    report_config = runtime_config
     crewai_google = is_crewai and report_config.get("provider") == "google"
     crewai_google_same_api = (
         crewai_google
         and isinstance(report_config.get("system_bundle_delta"), dict)
         and report_config["system_bundle_delta"].get("same_provider_api") is True
     )
+    token_cap_adjusted = _token_cap_adjustment(report_config) is not None
     track_name = (
         "CrewAI Offline — Google Gemini"
         if crewai_google
@@ -872,6 +881,12 @@ def score_quality_run(
     )
     bundle_note = (
         " Tor CrewAI+Gemini zachowuje ten sam model ID, runner dataset, semantykę "
+        "schema, decision policy i natywne GenerateContent v1 co Gemini Direct. "
+        "Wire schema, osobne prompty ról/zadań, trzy role i frozen domain evidence "
+        "pozostają różne."
+        + _token_cap_adjusted_bundle_note(report_config)
+        if token_cap_adjusted
+        else " Tor CrewAI+Gemini zachowuje ten sam model ID, runner dataset, semantykę "
         "schema, decision policy i natywne GenerateContent v1 co Gemini Direct. "
         "Wire schema, osobne prompty ról/zadań, trzy role i frozen domain evidence "
         "pozostają różne. Różnica jest `system_bundle_delta`, nie czystym wpływem "

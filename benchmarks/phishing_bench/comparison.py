@@ -33,8 +33,10 @@ from .quality_scoring import (
     _validate_quality_labels,
 )
 from .scoring import (
+    TOKEN_CAP_ADJUSTED_COMPARISON_TYPE,
     _execution_observability,
     _load_results,
+    _token_cap_adjustment,
     _validate_run_integrity,
 )
 
@@ -473,6 +475,7 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         for config in runtime_configs
     ]
     reasoning_efforts = [config.get("reasoning_effort") for config in runtime_configs]
+    max_output_tokens = [config.get("max_output_tokens") for config in runtime_configs]
     prompt_same = len(set(prompts)) == 1
     adapter_same = len(set(adapters)) == 1
     architecture_same = len(set(architectures)) == 1
@@ -484,16 +487,34 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         == "cross_api_system_bundle_delta"
         for config in runtime_configs
     )
+    token_cap_adjustments = [
+        {"variant_id": run.variant_id, **adjustment}
+        for run, config in zip(runs, runtime_configs, strict=True)
+        if (adjustment := _token_cap_adjustment(config)) is not None
+    ]
+    same_max_output_tokens = len(set(max_output_tokens)) == 1
     comparison_type = (
         "model_or_provider_delta"
         if prompt_same
         and architecture_same
+        and same_max_output_tokens
         and (
             not provider_same
             or (adapter_same and not model_same)
         )
         else "replication"
-        if prompt_same and adapter_same and model_same and provider_same
+        if (
+            prompt_same
+            and adapter_same
+            and model_same
+            and provider_same
+            and same_max_output_tokens
+        )
+        else TOKEN_CAP_ADJUSTED_COMPARISON_TYPE
+        if token_cap_adjustments
+        and model_same
+        and provider_same
+        and not same_max_output_tokens
         else "cross_api_system_bundle_delta"
         if disclosed_cross_api_delta
         and model_same
@@ -516,6 +537,9 @@ def _compatibility(runs: list[LoadedRun]) -> dict[str, Any]:
         "same_request_profile": len(set(request_profiles)) == 1,
         "request_profiles": request_profiles,
         "reasoning_efforts": reasoning_efforts,
+        "same_max_output_tokens": same_max_output_tokens,
+        "max_output_tokens": max_output_tokens,
+        "token_cap_adjustments": token_cap_adjustments,
         "frozen_invariants": public_frozen,
     }
 
@@ -579,6 +603,7 @@ def _run_row(run: LoadedRun) -> dict[str, Any]:
             else "chat_completions_legacy_v1"
         ),
         "reasoning_effort": config.get("reasoning_effort"),
+        "max_output_tokens": config.get("max_output_tokens"),
         "resolved_models": _resolved_models(run.results),
         "sample_count": dataset.get("sample_count"),
         "malicious_count": dataset.get("class_counts", {}).get("malicious"),
@@ -671,6 +696,7 @@ def _case_rows(run: LoadedRun) -> list[dict[str, Any]]:
                     else "chat_completions_legacy_v1"
                 ),
                 "reasoning_effort": config.get("reasoning_effort"),
+                "max_output_tokens": config.get("max_output_tokens"),
                 "resolved_model": raw.get("resolved_model"),
                 "config_id": config.get("config_id"),
                 "sample_id": scored.get("sample_id"),
@@ -910,11 +936,24 @@ def _render_report(
             f"tylko prawy={row['right_only_correct']}, "
             f"zgodność akcji={row['exact_action_agreement_count']}/{row['sample_count']}."
         )
+    token_cap_note = ""
+    adjustments = compatibility.get("token_cap_adjustments", [])
+    if adjustments:
+        adjustment = adjustments[0] if adjustments else {}
+        token_cap_note = (
+            "\n\nTo jest token-cap-adjusted system bundle: "
+            f"`max_output_tokens` Direct={_md(adjustment.get('direct_max_output_tokens'))}, "
+            f"CrewAI={_md(adjustment.get('crewai_max_output_tokens'))}. "
+            "Porównanie nie jest apples-to-apples ani czystą deltą frameworka; "
+            "różnice mogą obejmować wpływ odmiennego limitu outputu."
+        )
     return (
         "# Porównanie benchmarków phishing classifier\n\n"
         "Status wniosku: `INCONCLUSIVE`\n\n"
         f"Typ porównania: `{compatibility['comparison_type']}`. "
-        f"Baseline: `{compatibility['baseline_variant']}`.\n\n"
+        f"Baseline: `{compatibility['baseline_variant']}`."
+        + token_cap_note
+        + "\n\n"
         f"Ten sam profil requestu API: "
         f"`{str(compatibility['same_request_profile']).lower()}`; "
         f"profile: `{', '.join(compatibility['request_profiles'])}`.\n\n"

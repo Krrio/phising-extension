@@ -14,6 +14,8 @@ sys.path.insert(0, str(BENCHMARKS_DIR))
 
 from phishing_bench.contracts import (  # noqa: E402
     CREWAI_CONCISE_V2_CAMPAIGN_IDS,
+    CREWAI_CURRENT_MODEL_MATRIX_CAMPAIGN_IDS,
+    CREWAI_GEMINI37_OUTPUT_RECOVERY_CAMPAIGN_IDS,
     CREWAI_GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE,
     CREWAI_GEMINI31_FLASH_LITE_SMOKE_PROFILE,
     CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
@@ -22,8 +24,10 @@ from phishing_bench.contracts import (  # noqa: E402
     CREWAI_GPT54_MINI_SMOKE_PROFILE,
     CREWAI_GPT54_NANO_QUALITY_PILOT_PROFILE,
     CREWAI_GPT54_NANO_SMOKE_PROFILE,
+    ContractError,
     campaign_live_block_reason,
     load_and_validate_campaign,
+    validate_runtime_config,
 )
 from phishing_bench.crewai_offline import (  # noqa: E402
     _import_benchmark_factory,
@@ -94,8 +98,8 @@ MATRIX = {
             config("BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_PILOT_030_001"),
         ),
         "crew": (
-            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002"),
-            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002"),
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003"),
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003"),
         ),
     },
 }
@@ -110,6 +114,8 @@ SUPERSEDED_OR_COMPLETED_V1 = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_001",
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_001",
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001",
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
 )
 
 V1_TO_CONCISE_V2_PAIRS = (
@@ -144,6 +150,17 @@ V1_TO_CONCISE_V2_PAIRS = (
     (
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+    ),
+)
+
+GEMINI37_V2_TO_OUTPUT_RECOVERY_V3_PAIRS = (
+    (
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003",
+    ),
+    (
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003",
     ),
 )
 
@@ -196,6 +213,7 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                         crew["budget"]["max_attempts"], expected_count * 3
                     )
                     if name == "gemini37":
+                        self.assertEqual(direct["max_output_tokens"], 500)
                         self.assertEqual(
                             crew["system_bundle_delta"]["comparison_name"],
                             "system_bundle_delta",
@@ -206,6 +224,18 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                         self.assertEqual(
                             crew["system_bundle_delta"]["direct_api"],
                             "native_generate_content_v1",
+                        )
+                        self.assertEqual(crew["max_output_tokens"], 1000)
+                        self.assertFalse(
+                            crew["system_bundle_delta"]["same_max_output_tokens"]
+                        )
+                        self.assertEqual(
+                            crew["system_bundle_delta"]["direct_max_output_tokens"],
+                            500,
+                        )
+                        self.assertEqual(
+                            crew["system_bundle_delta"]["crewai_max_output_tokens"],
+                            1000,
                         )
                     elif name == "gemini31":
                         self.assertEqual(
@@ -263,9 +293,19 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                 else:
                     self.assertIsNone(campaign_live_block_reason(smoke))
                     self.assertIn(
-                        "prerequisite", campaign_live_block_reason(pilot) or ""
+                        "SMOKE_003", campaign_live_block_reason(pilot) or ""
                     )
-        self.assertEqual(matrix_campaign_ids, set(CREWAI_CONCISE_V2_CAMPAIGN_IDS))
+        self.assertEqual(
+            matrix_campaign_ids,
+            set(CREWAI_CURRENT_MODEL_MATRIX_CAMPAIGN_IDS),
+        )
+        self.assertEqual(
+            set(CREWAI_CONCISE_V2_CAMPAIGN_IDS) - matrix_campaign_ids,
+            {
+                "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
+                "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+            },
+        )
 
     def test_v1_matrix_campaigns_cannot_be_mixed_with_concise_v2(self) -> None:
         for campaign_id in SUPERSEDED_OR_COMPLETED_V1:
@@ -288,6 +328,89 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                     value["expected_asset_sha256"].pop("prompt")
                     value["expected_asset_sha256"].pop("crew_profile")
                 self.assertEqual(v2, v1)
+
+    def test_gemini37_output_recovery_changes_only_disclosed_token_budget(self) -> None:
+        recovery_ids = set()
+        for v2_id, v3_id in GEMINI37_V2_TO_OUTPUT_RECOVERY_V3_PAIRS:
+            with self.subTest(v3_id=v3_id):
+                v2 = read_json(config(v2_id))
+                v3 = read_json(config(v3_id))
+                recovery_ids.add(v3["campaign_id"])
+
+                self.assertEqual(v2["max_output_tokens"], 500)
+                self.assertEqual(v3["max_output_tokens"], 1000)
+                self.assertFalse(v3["system_bundle_delta"]["same_max_output_tokens"])
+                self.assertEqual(
+                    v3["system_bundle_delta"]["direct_max_output_tokens"], 500
+                )
+                self.assertEqual(
+                    v3["system_bundle_delta"]["crewai_max_output_tokens"], 1000
+                )
+                self.assertEqual(
+                    v3["system_bundle_delta"]["additional_components"][-1],
+                    "gemini37_hidden_reasoning_output_cap_recovery",
+                )
+                expected_v3_cap = 1.25 if "PILOT" in v3_id else 0.25
+                self.assertEqual(v3["budget"]["max_cost_usd"], expected_v3_cap)
+
+                for value in (v2, v3):
+                    value.pop("campaign_id")
+                    value.pop("config_id")
+                    value.pop("max_output_tokens")
+                if "PILOT" in v3_id:
+                    v2["budget"].pop("max_cost_usd")
+                    v3["budget"].pop("max_cost_usd")
+                v3_delta = v3["system_bundle_delta"]
+                v3_delta.pop("same_max_output_tokens")
+                v3_delta.pop("direct_max_output_tokens")
+                v3_delta.pop("crewai_max_output_tokens")
+                v3_delta["additional_components"].pop()
+                self.assertEqual(v3, v2)
+
+        self.assertEqual(
+            recovery_ids,
+            set(CREWAI_GEMINI37_OUTPUT_RECOVERY_CAMPAIGN_IDS),
+        )
+
+    def test_gemini37_output_recovery_limit_is_exact_and_campaign_scoped(self) -> None:
+        recovery = read_json(
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003")
+        )
+        recovery["max_output_tokens"] = 999
+        with self.assertRaisesRegex(ContractError, "max_output_tokens=1000"):
+            validate_runtime_config(recovery, REPO_ROOT)
+
+        historical = read_json(
+            config("BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002")
+        )
+        historical["max_output_tokens"] = 1000
+        with self.assertRaisesRegex(ContractError, "max_output_tokens=500"):
+            validate_runtime_config(historical, REPO_ROOT)
+
+        direct = read_json(
+            config("BUDGET_30H_GOOGLE_NATIVE_GEMINI37_FLASH_SMOKE_002")
+        )
+        direct["max_output_tokens"] = 1000
+        with self.assertRaisesRegex(ContractError, "Direct.*max_output_tokens=500"):
+            validate_runtime_config(direct, REPO_ROOT)
+
+        recovery_pilot = read_json(
+            config(
+                "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003"
+            )
+        )
+        recovery_pilot["budget"]["max_cost_usd"] = 1.24
+        with self.assertRaisesRegex(ContractError, "cost variant drift"):
+            validate_runtime_config(recovery_pilot, REPO_ROOT)
+
+        historical_pilot = read_json(
+            config(
+                "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002"
+            )
+        )
+        historical_pilot["budget"]["max_cost_usd"] = 1.25
+        with self.assertRaisesRegex(ContractError, "cost variant drift"):
+            validate_runtime_config(historical_pilot, REPO_ROOT)
 
     def test_scoring_bundles_accept_the_complete_new_matrix(self) -> None:
         smoke_manifest = read_json(SCORING / "openai_smoke_v1" / "scoring_manifest.json")
@@ -346,8 +469,11 @@ class FullCrewAIModelMatrixRuntimeTests(unittest.TestCase):
                     bundle.close()
 
     def test_google_profiles_use_model_supported_thinking_levels(self) -> None:
-        expected = {"gemini31": "minimal", "gemini37": "low"}
-        for name, thinking_level in expected.items():
+        expected = {
+            "gemini31": ("minimal", 500),
+            "gemini37": ("low", 1000),
+        }
+        for name, (thinking_level, max_tokens) in expected.items():
             with self.subTest(model=name):
                 config_value, assets = load_and_validate_campaign(
                     MATRIX[name]["crew"][0], REPO_ROOT
@@ -357,6 +483,10 @@ class FullCrewAIModelMatrixRuntimeTests(unittest.TestCase):
                 self.assertEqual(
                     [row["thinking_level"] for row in report["effective_profile"]["agents"]],
                     [thinking_level] * 3,
+                )
+                self.assertEqual(
+                    [row["max_tokens"] for row in report["effective_profile"]["agents"]],
+                    [max_tokens] * 3,
                 )
                 self.assertTrue(
                     all(

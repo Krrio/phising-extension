@@ -289,6 +289,14 @@ CREWAI_CHALLENGER_VARIANTS = {
         0.25,
         1800,
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003": (
+        CREWAI_GEMINI37_FLASH_SMOKE_PROFILE,
+        "crewai-offline__google-native__gemini-3.7-flash__crew-v2-concise-specialists__thinking-low__max-output1000__smoke005__timeout120__transient-fail-fast__no-retry-v3",
+        120,
+        15,
+        0.25,
+        1800,
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001": (
         CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
         "crewai-offline__google-native__gemini-3.7-flash__crew-v1__thinking-low__pilot030__timeout120__transient-fail-fast__no-retry-v1",
@@ -305,8 +313,16 @@ CREWAI_CHALLENGER_VARIANTS = {
         1.00,
         7200,
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003": (
+        CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE,
+        "crewai-offline__google-native__gemini-3.7-flash__crew-v2-concise-specialists__thinking-low__max-output1000__pilot030__timeout120__transient-fail-fast__no-retry-v3",
+        120,
+        90,
+        1.25,
+        7200,
+    ),
 }
-CREWAI_CONCISE_V2_CAMPAIGN_IDS = frozenset(
+CREWAI_CURRENT_MODEL_MATRIX_CAMPAIGN_IDS = frozenset(
     {
         "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003",
         "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002",
@@ -314,8 +330,21 @@ CREWAI_CONCISE_V2_CAMPAIGN_IDS = frozenset(
         "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003",
+    }
+)
+CREWAI_CONCISE_V2_CAMPAIGN_IDS = frozenset(
+    {
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+    }
+    | CREWAI_CURRENT_MODEL_MATRIX_CAMPAIGN_IDS
+)
+CREWAI_GEMINI37_OUTPUT_RECOVERY_CAMPAIGN_IDS = frozenset(
+    {
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003",
     }
 )
 CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS = frozenset(
@@ -330,6 +359,8 @@ CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS = frozenset(
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002",
         "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003",
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003",
     }
 )
 LIVE_BLOCKED_CAMPAIGNS = {
@@ -457,8 +488,20 @@ LIVE_BLOCKED_CAMPAIGNS = {
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_001": (
         "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
     ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002": (
+        "closed after the recorded Gemini 3.7 concise-v2 smoke "
+        "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_002"
+        "__20260905T130714Z__c23063b0 produced only 2/5 successful workflows; "
+        "three specialist calls reached the 500-token output limit; preserve "
+        "the READINESS_FAIL result and use the isolated max-output1000 SMOKE_003"
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002": (
-        "prerequisite CrewAI Gemini 3.7 concise-v2 SMOKE_002 has not yet "
+        "unrun pilot superseded after prerequisite SMOKE_002 failed because "
+        "three specialist calls reached the 500-token output limit; use the "
+        "isolated max-output1000 PILOT_030_003 only after SMOKE_003 passes"
+    ),
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003": (
+        "prerequisite CrewAI Gemini 3.7 max-output1000 SMOKE_003 has not yet "
         "produced an audited READINESS_PASS"
     ),
 }
@@ -1077,6 +1120,17 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
                 ],
             }
         )
+        if config["campaign_id"] in CREWAI_GEMINI37_OUTPUT_RECOVERY_CAMPAIGN_IDS:
+            expected_bundle_delta.update(
+                {
+                    "same_max_output_tokens": False,
+                    "direct_max_output_tokens": 500,
+                    "crewai_max_output_tokens": 1000,
+                }
+            )
+            expected_bundle_delta["additional_components"].append(
+                "gemini37_hidden_reasoning_output_cap_recovery"
+            )
         if config["system_bundle_delta"] != expected_bundle_delta:
             raise ContractError("CrewAI system_bundle_delta disclosure drift")
     elif config["max_retries_per_sample"] not in {0, 1}:
@@ -1116,8 +1170,17 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
         and config["request_timeout_seconds"] != 45
     ):
         raise ContractError("CrewAI Offline requires request_timeout_seconds=45")
-    if is_crewai and config["max_output_tokens"] != 500:
-        raise ContractError("CrewAI Offline requires max_output_tokens=500")
+    expected_max_output_tokens = (
+        1000
+        if config["campaign_id"] in CREWAI_GEMINI37_OUTPUT_RECOVERY_CAMPAIGN_IDS
+        else 500
+    )
+    if config["max_output_tokens"] != expected_max_output_tokens:
+        track_name = "CrewAI Offline" if is_crewai else "Direct"
+        raise ContractError(
+            f"{track_name} campaign requires "
+            f"max_output_tokens={expected_max_output_tokens}"
+        )
     budget = config["budget"]
     if not isinstance(budget, dict) or set(budget) != {"max_attempts", "max_cost_usd", "max_wall_seconds"}:
         raise ContractError("invalid budget contract")
@@ -1253,12 +1316,21 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             raise ContractError("CrewAI smoke requires expected_sample_count=5")
         if config["budget"]["max_attempts"] != 15:
             raise ContractError("CrewAI smoke requires max_attempts=15")
+    maximum_cost_cap = (
+        1.25
+        if config["campaign_id"]
+        == "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003"
+        else 1.00
+    )
     if (
         isinstance(budget["max_cost_usd"], bool)
         or not isinstance(budget["max_cost_usd"], (int, float))
-        or not 0 < budget["max_cost_usd"] <= 1
+        or not 0 < budget["max_cost_usd"] <= maximum_cost_cap
     ):
-        raise ContractError("max_cost_usd is required and must be in (0, 1]")
+        raise ContractError(
+            "max_cost_usd is required and must be in "
+            f"(0, {maximum_cost_cap:.2f}]"
+        )
     if evaluation_profile in SMOKE_PROFILES:
         if (
             isinstance(budget["max_wall_seconds"], bool)
@@ -1297,7 +1369,12 @@ def validate_runtime_config(config: dict[str, Any], repo_root: Path) -> dict[str
             CREWAI_GPT54_NANO_QUALITY_PILOT_PROFILE: 0.50,
             CREWAI_GPT54_MINI_QUALITY_PILOT_PROFILE: 1.00,
             CREWAI_GEMINI31_FLASH_LITE_QUALITY_PILOT_PROFILE: 0.50,
-            CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE: 1.00,
+            CREWAI_GEMINI37_FLASH_QUALITY_PILOT_PROFILE: (
+                1.25
+                if config["campaign_id"]
+                == "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003"
+                else 1.00
+            ),
         }.get(evaluation_profile, 0.25)
         if float(budget["max_cost_usd"]) != expected_quality_cost_cap:
             raise ContractError(

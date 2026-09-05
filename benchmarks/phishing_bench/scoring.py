@@ -75,6 +75,57 @@ ALLOWED_SECURITY_EVENT_TYPES = CRITICAL_SECURITY_EVENT_TYPES | {
     "secret_like_output",
 }
 EVIDENCE_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+TOKEN_CAP_ADJUSTED_COMPARISON_TYPE = "token_cap_adjusted_system_bundle_delta"
+
+
+def _token_cap_adjustment(
+    runtime_config: dict[str, Any],
+) -> dict[str, int | str] | None:
+    """Return the explicit Direct/CrewAI output-cap delta, when disclosed."""
+
+    scope = runtime_config.get("system_bundle_delta")
+    if not isinstance(scope, dict) or scope.get("same_max_output_tokens") is not False:
+        return None
+    direct_cap = scope.get("direct_max_output_tokens")
+    crewai_cap = scope.get("crewai_max_output_tokens")
+    if (
+        isinstance(direct_cap, bool)
+        or not isinstance(direct_cap, int)
+        or direct_cap <= 0
+        or isinstance(crewai_cap, bool)
+        or not isinstance(crewai_cap, int)
+        or crewai_cap <= 0
+        or direct_cap == crewai_cap
+    ):
+        return None
+    return {
+        "comparison_type": TOKEN_CAP_ADJUSTED_COMPARISON_TYPE,
+        "direct_max_output_tokens": direct_cap,
+        "crewai_max_output_tokens": crewai_cap,
+    }
+
+
+def _comparison_scope_type(runtime_config: dict[str, Any]) -> str | None:
+    adjustment = _token_cap_adjustment(runtime_config)
+    if adjustment is not None:
+        return TOKEN_CAP_ADJUSTED_COMPARISON_TYPE
+    scope = runtime_config.get("system_bundle_delta")
+    comparison_name = scope.get("comparison_name") if isinstance(scope, dict) else None
+    return comparison_name if isinstance(comparison_name, str) else None
+
+
+def _token_cap_adjusted_bundle_note(runtime_config: dict[str, Any]) -> str:
+    adjustment = _token_cap_adjustment(runtime_config)
+    if adjustment is None:
+        return ""
+    return (
+        f" Jest to `{TOKEN_CAP_ADJUSTED_COMPARISON_TYPE}` "
+        "(token-cap-adjusted system bundle): `max_output_tokens` wynosi "
+        f"{adjustment['direct_max_output_tokens']} dla Direct i "
+        f"{adjustment['crewai_max_output_tokens']} dla CrewAI. Nie jest to "
+        "porównanie apples-to-apples ani czysta delta frameworka; różnica może "
+        "obejmować wpływ wyższego limitu outputu."
+    )
 
 
 def _execution_observability(
@@ -730,6 +781,9 @@ def score_run(
         "comparison_scope": (
             runtime_config.get("system_bundle_delta") if is_crewai else None
         ),
+        "comparison_scope_type": (
+            _comparison_scope_type(runtime_config) if is_crewai else None
+        ),
         "disclaimer": (
             "Five synthetic records validate the harness only. They do not estimate precision, recall, "
             "F1, false-positive rate, production readiness, or model superiority."
@@ -801,6 +855,7 @@ def score_run(
 
     rows = [
         ("campaign_status", campaign_status),
+        ("comparison_scope_type", metrics["comparison_scope_type"]),
         ("records_expected", expected_count),
         ("records_received", len(results)),
         ("schema_valid", valid_schema_count),
@@ -850,6 +905,7 @@ def score_run(
         and isinstance(runtime_config.get("system_bundle_delta"), dict)
         and runtime_config["system_bundle_delta"].get("same_provider_api") is True
     )
+    token_cap_adjusted = _token_cap_adjustment(runtime_config) is not None
     report_title = (
         "Raport CrewAI Offline + Google Gemini smoke"
         if crewai_google
@@ -870,6 +926,11 @@ def score_run(
     )
     track_note = (
         " To jest pomiar całego bundle CrewAI+Gemini: ten sam model ID, dataset, "
+        "semantyka schema, decision policy i natywne GenerateContent v1 co Direct. "
+        "Wire schema, prompty, trzy role i frozen evidence pozostają różne."
+        + _token_cap_adjusted_bundle_note(runtime_config)
+        if token_cap_adjusted
+        else " To jest pomiar całego bundle CrewAI+Gemini: ten sam model ID, dataset, "
         "semantyka schema, decision policy i natywne GenerateContent v1 co Direct. "
         "Wire schema, prompty, trzy role i frozen evidence pozostają różne. Jest "
         "to `system_bundle_delta`, nie czysta delta frameworka."

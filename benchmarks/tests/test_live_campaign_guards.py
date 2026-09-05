@@ -66,6 +66,12 @@ CREW_GEMINI37_SMOKE_002_ID = (
 CREW_GEMINI37_PILOT_002_ID = (
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_002"
 )
+CREW_GEMINI37_SMOKE_003_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_SMOKE_003"
+)
+CREW_GEMINI37_PILOT_003_ID = (
+    "BUDGET_30H_CREWAI_GOOGLE_GEMINI37_FLASH_OFFLINE_PILOT_030_003"
+)
 CREW_GPT54_NANO_SMOKE_001_ID = (
     "BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_001"
 )
@@ -156,6 +162,30 @@ CREW_GPT54_MINI_PILOT_002_CONFIG = (
     / CREW_GPT54_MINI_PILOT_002_ID
     / "runtime_config.json"
 )
+CREW_GEMINI37_SMOKE_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI37_SMOKE_002_ID
+    / "runtime_config.json"
+)
+CREW_GEMINI37_PILOT_002_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI37_PILOT_002_ID
+    / "runtime_config.json"
+)
+CREW_GEMINI37_SMOKE_003_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI37_SMOKE_003_ID
+    / "runtime_config.json"
+)
+CREW_GEMINI37_PILOT_003_CONFIG = (
+    BENCHMARKS_DIR
+    / "campaigns"
+    / CREW_GEMINI37_PILOT_003_ID
+    / "runtime_config.json"
+)
 HAS_CREWAI = importlib.util.find_spec("crewai") is not None
 FAKE_KEY = "gemini_FAKE_live_guard_secret_123456"
 
@@ -182,6 +212,8 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                     CREW_GEMINI37_PILOT_ID,
                     CREW_GEMINI37_SMOKE_002_ID,
                     CREW_GEMINI37_PILOT_002_ID,
+                    CREW_GEMINI37_SMOKE_003_ID,
+                    CREW_GEMINI37_PILOT_003_ID,
                 }
             ),
         )
@@ -268,6 +300,16 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 CREW_GPT54_MINI_PILOT_002_CONFIG,
                 "recorded 30/30 technically successful",
             ),
+            (
+                CREW_GEMINI37_SMOKE_002_ID,
+                CREW_GEMINI37_SMOKE_002_CONFIG,
+                "only 2/5 successful workflows",
+            ),
+            (
+                CREW_GEMINI37_PILOT_002_ID,
+                CREW_GEMINI37_PILOT_002_CONFIG,
+                "superseded after prerequisite SMOKE_002 failed",
+            ),
         ):
             with self.subTest(campaign_id=campaign_id):
                 config, _ = load_and_validate_campaign(config_path, REPO_ROOT)
@@ -302,6 +344,9 @@ class ClosedCampaignGuardTests(unittest.TestCase):
             (CREW_GEMINI31_PILOT_002_ID, CREW_GEMINI31_PILOT_002_CONFIG),
             (CREW_GPT54_MINI_SMOKE_002_ID, CREW_GPT54_MINI_SMOKE_002_CONFIG),
             (CREW_GPT54_MINI_PILOT_002_ID, CREW_GPT54_MINI_PILOT_002_CONFIG),
+            (CREW_GEMINI37_SMOKE_002_ID, CREW_GEMINI37_SMOKE_002_CONFIG),
+            (CREW_GEMINI37_PILOT_002_ID, CREW_GEMINI37_PILOT_002_CONFIG),
+            (CREW_GEMINI37_PILOT_003_ID, CREW_GEMINI37_PILOT_003_CONFIG),
         ):
             with self.subTest(campaign_id=campaign_id):
                 stderr = io.StringIO()
@@ -327,6 +372,51 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 self.assertIn("live run is blocked", stderr.getvalue())
                 self.assertNotIn("ustaw GEMINI_API_KEY", stderr.getvalue())
                 self.assertNotIn("ustaw OPENAI_API_KEY", stderr.getvalue())
+
+    @unittest.skipUnless(HAS_CREWAI, "requires the pinned CrewAI environment")
+    def test_gemini37_output_recovery_smoke_is_ready_but_pilot_is_blocked(self) -> None:
+        smoke, smoke_assets = load_and_validate_campaign(
+            CREW_GEMINI37_SMOKE_003_CONFIG, REPO_ROOT
+        )
+        smoke_report = crewai_readiness_report(
+            CREW_GEMINI37_SMOKE_003_CONFIG, REPO_ROOT
+        )
+        pilot, _ = load_and_validate_campaign(
+            CREW_GEMINI37_PILOT_003_CONFIG, REPO_ROOT
+        )
+        pilot_report = crewai_readiness_report(
+            CREW_GEMINI37_PILOT_003_CONFIG, REPO_ROOT
+        )
+
+        self.assertIsNone(campaign_live_block_reason(smoke))
+        self.assertEqual(
+            smoke_report["status"], "READY_FOR_MANUAL_LIVE_CONFIRMATION"
+        )
+        self.assertEqual(smoke_report["runtime_preflight"]["provider_calls_made"], 0)
+        self.assertEqual(
+            [
+                row["max_tokens"]
+                for row in smoke_report["runtime_preflight"]["effective_profile"][
+                    "agents"
+                ]
+            ],
+            [1000, 1000, 1000],
+        )
+        self.assertEqual(len(smoke_assets["dataset"]), 5)
+        self.assertIsNotNone(campaign_live_block_reason(pilot))
+        self.assertEqual(pilot_report["status"], "LIVE_BLOCKED")
+        self.assertIn("SMOKE_003", pilot_report["live_block_reason"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "live run is blocked"):
+                run_crewai_campaign(
+                    config_path=CREW_GEMINI37_PILOT_003_CONFIG,
+                    repo_root=REPO_ROOT,
+                    output_root=Path(temporary) / "runs",
+                    api_key=FAKE_KEY,
+                    live_authorized=True,
+                    confirm_campaign=CREW_GEMINI37_PILOT_003_ID,
+                )
 
     def test_cli_rejects_google_key_for_openai_before_crewai_import(self) -> None:
         wrong_key = "AIza" + "X" * 32

@@ -674,8 +674,17 @@ def build_benchmark_crew(
     return BenchmarkCrewBundle(crew=benchmark_crew, call_budget=call_budget)
 
 
-def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
+def audit_benchmark_crew(
+    bundle: BenchmarkCrewBundle, *, expected_max_output_tokens: int = 500
+) -> dict[str, Any]:
     """Assert and return the effective no-hidden-capability runtime profile."""
+
+    if (
+        isinstance(expected_max_output_tokens, bool)
+        or not isinstance(expected_max_output_tokens, int)
+        or expected_max_output_tokens <= 0
+    ):
+        raise ValueError("expected_max_output_tokens must be a positive integer")
 
     benchmark_crew = bundle.crew
     if (
@@ -787,15 +796,16 @@ def audit_benchmark_crew(bundle: BenchmarkCrewBundle) -> dict[str, Any]:
                 llm.provider != "gemini"
                 or llm.temperature is not None
                 or llm.base_url is not None
-                or llm.max_tokens != 500
+                or llm.max_tokens != expected_max_output_tokens
                 or not valid_timeout
                 or agent.max_execution_time != int(float(timeout_seconds))
                 or llm.additional_params != expected_outer_params
-                or getattr(llm.delegate, "max_output_tokens", None) != 500
+                or getattr(llm.delegate, "max_output_tokens", None)
+                != expected_max_output_tokens
                 or getattr(llm.delegate, "use_vertexai", None) is not False
                 or getattr(llm.delegate, "project", None) is not None
                 or response_format is not expected_response_format
-                or generation_config.max_output_tokens != 500
+                or generation_config.max_output_tokens != expected_max_output_tokens
                 or generation_config.temperature is not None
                 or generation_config.tools is not None
                 or generation_config.thinking_config is None

@@ -398,7 +398,10 @@ def crewai_runtime_preflight(
             tls_context=(validated_tls_context() if provider == "google" else None),
         )
         try:
-            audit = audit_crew(bundle)
+            audit = audit_crew(
+                bundle,
+                expected_max_output_tokens=config["max_output_tokens"],
+            )
             telemetry_audit = _crewai_telemetry_audit(provider)
             expected_model = config["requested_model"]
             expected_framework_provider = (
@@ -720,7 +723,10 @@ def _execute_real_workflow(
             reasoning_effort=config.get("reasoning_effort"),
             tls_context=(validated_tls_context() if provider == "google" else None),
         )
-        audit = audit_crew(bundle)
+        audit = audit_crew(
+            bundle,
+            expected_max_output_tokens=config["max_output_tokens"],
+        )
         audit["telemetry"] = _crewai_telemetry_audit(provider)
 
     try:
