@@ -424,6 +424,12 @@ LIVE_BLOCKED_CAMPAIGNS = {
     "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_001": (
         "unrun CrewAI v1 pilot superseded by concise-v2 PILOT_030_002"
     ),
+    "BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002": (
+        "closed after the recorded 30/30 technically successful concise-v2 "
+        "quality pilot BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_"
+        "030_002__20260902T125258Z__22232745; preserve the PILOT_HOLD result "
+        "with TP=15, FP=2, TN=13, FN=0 and do not rerun the frozen set"
+    ),
     "BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_001": (
         "unrun CrewAI v1 campaign superseded before live execution by the "
         "shared concise-v2 matrix protocol; use SMOKE_002"

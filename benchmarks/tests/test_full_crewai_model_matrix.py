@@ -250,7 +250,9 @@ class FullCrewAIModelMatrixContractTests(unittest.TestCase):
                     self.assertIn(
                         "f469a51c", campaign_live_block_reason(smoke) or ""
                     )
-                    self.assertIsNone(campaign_live_block_reason(pilot))
+                    self.assertIn(
+                        "22232745", campaign_live_block_reason(pilot) or ""
+                    )
                 elif name == "gemini31":
                     self.assertIn(
                         "57ccf719", campaign_live_block_reason(smoke) or ""

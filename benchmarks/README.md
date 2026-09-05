@@ -43,9 +43,10 @@ Engineering smoke uzasadnił wspólny concise-v2 prompt/profile: jeden akapit i
 maksymalnie 600 znaków dla raportu specjalisty, bez zmiany limitu 500 tokenów,
 danych, schema, decision policy, liczby ról ani retry. V2 ma osobne campaign IDs
 i obowiązuje identycznie GPT-5.4 Nano, GPT-5.4 Mini, Gemini 3.1 i Gemini 3.7.
-Stare ID v1 są zamknięte; nowe smoke są gotowe, a ich piloty pozostają
-`LIVE_BLOCKED` do czasu przejścia własnego smoke. Dokładny stan, budżet i
-komendy zawiera
+Stare ID v1 są zamknięte. Concise-v2 Nano, Mini i Gemini 3.1 zakończyły już
+własne smoke oraz piloty i wszystkie te campaign IDs są `LIVE_BLOCKED` przed
+rerunem. Pozostał smoke CrewAI + Gemini 3.7; jego pilot pozostaje zablokowany do
+audytowanego `READINESS_PASS`. Dokładny stan, budżet i komendy zawiera
 [`FULL_MODEL_MATRIX_RUNBOOK.md`](FULL_MODEL_MATRIX_RUNBOOK.md).
 
 Pilot natywnego Direct Gemini 3.7 zakończył 30/30 rekordów i 30 attempts bez
@@ -148,10 +149,11 @@ Najważniejsze pliki:
 | `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_SMOKE_003/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli zakończonych `stop`, koszt `0,00627115 USD`, mediana `5249,214 ms`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_NANO_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, TP=15, FP=10, TN=5, FN=0, koszt `0,0377574 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_SMOKE_002/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli zakończonych `stop`, koszt `0,02078925 USD`, mediana `4607,212 ms`; programowo `LIVE_BLOCKED` |
+| `campaigns/BUDGET_30H_CREWAI_OPENAI_GPT54_MINI_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, TP=15, FP=2, TN=13, FN=0, koszt `0,12213975 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_SMOKE_002/` | zakończony `READINESS_PASS`: 5/5 sukcesów, 15/15 calli zakończonych `stop`, koszt `0,007632 USD`, mediana `3535,798 ms`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_GOOGLE_GEMINI31_FLASH_LITE_OFFLINE_PILOT_030_002/` | zakończony `PILOT_HOLD`: 30/30 sukcesów, TP=15, FP=2, TN=13, FN=0, koszt `0,04549475 USD`; programowo `LIVE_BLOCKED` |
 | `campaigns/BUDGET_30H_CREWAI_OFFLINE_SMOKE_001/{crew_system_prompt_v2.txt,crew_profile_v2.json}` | wspólny, zamrożony kontrakt krótkich raportów specjalistów dla czterech nowych ramion CrewAI |
-| `campaigns/BUDGET_30H_CREWAI_{OPENAI,GOOGLE}_*/` | nowe concise-v2 smoke/pilot mają osobne ID; ramiona Nano i Gemini 3.1 są zamknięte, smoke Mini przeszedł i odblokował własny pilot, a smoke Gemini 3.7 pozostaje aktywny |
+| `campaigns/BUDGET_30H_CREWAI_{OPENAI,GOOGLE}_*/` | nowe concise-v2 smoke/pilot mają osobne ID; ramiona Nano, Mini i Gemini 3.1 są zamknięte, a smoke Gemini 3.7 pozostaje aktywny |
 | `backend/guardian/src/guardian_classic/benchmark_crew.py` | benchmarkowa fabryka trzech agentów; nie zmienia produkcyjnego Crew |
 | `phishing_bench/crewai_offline.py` | izolacja procesu, egress guard, call budget i artefakty CrewAI |
 | `phishing_bench/gemini_direct.py` | bezpośrednie transporty Gemini Interactions i natywnego GenerateContent z izolacją sieci, jawnymi kontraktami, limitem odpowiedzi i bezpiecznym parsowaniem usage |

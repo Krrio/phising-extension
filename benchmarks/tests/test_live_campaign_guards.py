@@ -18,6 +18,7 @@ sys.path.insert(0, str(BENCHMARKS_DIR))
 from benchmark_cli import main as benchmark_main  # noqa: E402
 from phishing_bench.contracts import (  # noqa: E402
     CREWAI_GEMINI_TRANSIENT_FAIL_FAST_CAMPAIGN_IDS,
+    LIVE_BLOCKED_CAMPAIGNS,
     campaign_live_block_reason,
     load_and_validate_campaign,
 )
@@ -262,6 +263,11 @@ class ClosedCampaignGuardTests(unittest.TestCase):
                 CREW_GPT54_MINI_SMOKE_002_CONFIG,
                 "audited 5/5 successful",
             ),
+            (
+                CREW_GPT54_MINI_PILOT_002_ID,
+                CREW_GPT54_MINI_PILOT_002_CONFIG,
+                "recorded 30/30 technically successful",
+            ),
         ):
             with self.subTest(campaign_id=campaign_id):
                 config, _ = load_and_validate_campaign(config_path, REPO_ROOT)
@@ -295,6 +301,7 @@ class ClosedCampaignGuardTests(unittest.TestCase):
             (CREW_GEMINI31_SMOKE_002_ID, CREW_GEMINI31_SMOKE_002_CONFIG),
             (CREW_GEMINI31_PILOT_002_ID, CREW_GEMINI31_PILOT_002_CONFIG),
             (CREW_GPT54_MINI_SMOKE_002_ID, CREW_GPT54_MINI_SMOKE_002_CONFIG),
+            (CREW_GPT54_MINI_PILOT_002_ID, CREW_GPT54_MINI_PILOT_002_CONFIG),
         ):
             with self.subTest(campaign_id=campaign_id):
                 stderr = io.StringIO()
@@ -324,7 +331,13 @@ class ClosedCampaignGuardTests(unittest.TestCase):
     def test_cli_rejects_google_key_for_openai_before_crewai_import(self) -> None:
         wrong_key = "AIza" + "X" * 32
         stderr = io.StringIO()
+        open_campaigns = {
+            campaign_id: reason
+            for campaign_id, reason in LIVE_BLOCKED_CAMPAIGNS.items()
+            if campaign_id != CREW_GPT54_MINI_PILOT_002_ID
+        }
         with (
+            patch.dict(LIVE_BLOCKED_CAMPAIGNS, open_campaigns, clear=True),
             patch.dict(os.environ, {"OPENAI_API_KEY": wrong_key}),
             contextlib.redirect_stderr(stderr),
         ):
