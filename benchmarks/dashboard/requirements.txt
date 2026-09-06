@@ -1,0 +1,7 @@
+# Separate visualisation environment; do not install into backend/guardian/.venv.
+pandas==3.0.5
+plotly==7.0.0
+streamlit==1.63.0
+matplotlib==3.11.1
+seaborn==0.13.2
+openpyxl==3.1.5
