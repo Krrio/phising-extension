@@ -1,4 +1,4 @@
-# Phishing Guard — dokumentacja techniczna i instrukcja obsługi
+# Phishing Guard - dokumentacja techniczna i instrukcja obsługi
 
 Stan opisu: 2026-09-08. Dokument opisuje implementację znajdującą się w
 repozytorium. Nazwa rozszerzenia w Chrome to `Phishing Extension MVP`, a
@@ -24,16 +24,16 @@ interfejs posługuje się nazwami `Phishing Guard` i `Guardian`.
 
 ## 1. Elementy systemu
 
-| Element | Zadanie | Kiedy jest potrzebny |
-| --- | --- | --- |
-| Rozszerzenie Chrome | Odczyt widocznego tekstu i linków, podświetlenia, popup, ręczna analiza, Guardian | Do pracy na stronach |
-| FastAPI na porcie 8000 | Endpoint Guardiana i zapis historii w SQLite | Do automatycznej analizy CrewAI i wykresów historii |
-| `GuardianClassic` / CrewAI | Analiza domen, analiza treści i synteza werdyktu | Gdy wywoływany jest `/guardian/analyze` |
-| OpenAI API | Model dla ręcznej analizy i domyślnej konfiguracji backendu | Przy analizach AI |
-| `dashboard.html` | Historia analiz użytkownika i lokalny audyt Guardiana | Otwierany z popupu rozszerzenia |
-| Streamlit na porcie 8501 | Porównanie wyników eksperymentów Direct/CrewAI | Do oglądania benchmarków |
-| `benchmark_cli.py` | Walidacja kampanii, pomiar, scoring i porównanie | Do własnych eksperymentów |
-| `playground.html` | Lokalna demonstracyjna skrzynka z syntetycznymi wiadomościami | Do sprawdzania zachowania rozszerzenia |
+| Element                    | Zadanie                                                                           | Kiedy jest potrzebny                                |
+| -------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Rozszerzenie Chrome        | Odczyt widocznego tekstu i linków, podświetlenia, popup, ręczna analiza, Guardian | Do pracy na stronach                                |
+| FastAPI na porcie 8000     | Endpoint Guardiana i zapis historii w SQLite                                      | Do automatycznej analizy CrewAI i wykresów historii |
+| `GuardianClassic` / CrewAI | Analiza domen, analiza treści i synteza werdyktu                                  | Gdy wywoływany jest `/guardian/analyze`             |
+| OpenAI API                 | Model dla ręcznej analizy i domyślnej konfiguracji backendu                       | Przy analizach AI                                   |
+| `dashboard.html`           | Historia analiz użytkownika i lokalny audyt Guardiana                             | Otwierany z popupu rozszerzenia                     |
+| Streamlit na porcie 8501   | Porównanie wyników eksperymentów Direct/CrewAI                                    | Do oglądania benchmarków                            |
+| `benchmark_cli.py`         | Walidacja kampanii, pomiar, scoring i porównanie                                  | Do własnych eksperymentów                           |
+| `playground.html`          | Lokalna demonstracyjna skrzynka z syntetycznymi wiadomościami                     | Do sprawdzania zachowania rozszerzenia              |
 
 `dashboard.html` oraz Streamlit prezentują różne dane. Pierwszy czyta historię
 użytkowania rozszerzenia, drugi eksporty benchmarków. Uruchomienie Streamlit
@@ -43,16 +43,16 @@ nie uruchamia backendu ani rozszerzenia.
 
 ## 2. Wymagania
 
-| Składnik | Wymaganie projektu |
-| --- | --- |
-| Przeglądarka | Chrome z obsługą Manifest V3 i możliwością włączenia trybu dewelopera |
-| Node.js | Do instalacji wybierz 22.x lub 24.x; zablokowana zależność Tailwind wymaga co najmniej Node 20 |
-| npm | Dostarczany z Node.js; instalacja przez `npm ci` i `package-lock.json` |
-| Python | Zalecany 3.13; pakiet Guardian deklaruje `>=3.10,<3.14`, a osobny dashboard ma własne wymagania bibliotek |
-| `uv` | Instalacja środowiska CrewAI z `uv.lock` i pozostałych pakietów Python |
-| Git | Klonowanie i wersjonowanie kodu, danych syntetycznych i konfiguracji |
-| Dostęp do sieci | Pobranie bibliotek, wywołania modeli oraz RDAP/WHOIS w produktowym Guardianie |
-| Klucz API | Własny klucz dostawcy z dostępem do wybranego modelu i dostępnym limitem API |
+| Składnik        | Wymaganie projektu                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| Przeglądarka    | Chrome z obsługą Manifest V3 i możliwością włączenia trybu dewelopera                                     |
+| Node.js         | Do instalacji wybierz 22.x lub 24.x; zablokowana zależność Tailwind wymaga co najmniej Node 20            |
+| npm             | Dostarczany z Node.js; instalacja przez `npm ci` i `package-lock.json`                                    |
+| Python          | Zalecany 3.13; pakiet Guardian deklaruje `>=3.10,<3.14`, a osobny dashboard ma własne wymagania bibliotek |
+| `uv`            | Instalacja środowiska CrewAI z `uv.lock` i pozostałych pakietów Python                                    |
+| Git             | Klonowanie i wersjonowanie kodu, danych syntetycznych i konfiguracji                                      |
+| Dostęp do sieci | Pobranie bibliotek, wywołania modeli oraz RDAP/WHOIS w produktowym Guardianie                             |
+| Klucz API       | Własny klucz dostawcy z dostępem do wybranego modelu i dostępnym limitem API                              |
 
 Nie potrzeba własnego GPU, Dockera, osobnego serwera bazy danych ani konta
 CrewAI AMP. Modele wykonują się u dostawcy API, a SQLite działa lokalnie.
@@ -135,14 +135,14 @@ Drugie polecenie dodaje FastAPI, Uvicorn, SQLModel i pakiet Guardian w trybie
 editable. Musi być uruchomione z `backend/`, ponieważ `requirements.txt`
 zawiera względny wpis `-e ./guardian`.
 
-| Zależność | Rola |
-| --- | --- |
-| `crewai[google-genai,tools]==1.15.8` | Agenci, zadania, narzędzia i obsługa providerów |
-| `google-genai==1.65.0` | Natywne wywołania Google w odpowiednich profilach CrewAI |
-| `idna`, `tldextract`, `python-levenshtein` | Normalizacja i analiza domen |
-| `python-whois` | Fallback WHOIS dla daty rejestracji domeny |
-| `fastapi`, `uvicorn`, `sqlmodel` | HTTP API, serwer i historia SQLite |
-| `python-dotenv`, Pydantic | Wczytywanie konfiguracji i walidacja; instalowane w drzewie zależności |
+| Zależność                                  | Rola                                                                   |
+| ------------------------------------------ | ---------------------------------------------------------------------- |
+| `crewai[google-genai,tools]==1.15.8`       | Agenci, zadania, narzędzia i obsługa providerów                        |
+| `google-genai==1.65.0`                     | Natywne wywołania Google w odpowiednich profilach CrewAI               |
+| `idna`, `tldextract`, `python-levenshtein` | Normalizacja i analiza domen                                           |
+| `python-whois`                             | Fallback WHOIS dla daty rejestracji domeny                             |
+| `fastapi`, `uvicorn`, `sqlmodel`           | HTTP API, serwer i historia SQLite                                     |
+| `python-dotenv`, Pydantic                  | Wczytywanie konfiguracji i walidacja; instalowane w drzewie zależności |
 
 FastAPI, Uvicorn i SQLModel nie mają przypiętych wersji w
 `backend/requirements.txt`; lockfile Guardian nie jest kompletnym lockfile
@@ -167,9 +167,9 @@ uv run --project guardian --no-sync --env-file guardian/.env \
 Pozostaw terminal otwarty. Uvicorn nasłuchuje na `127.0.0.1:8000`; `--reload`
 służy do pracy deweloperskiej. `Ctrl+C` zatrzymuje serwer.
 
-- <http://127.0.0.1:8000/docs> — interaktywna dokumentacja FastAPI;
-- <http://127.0.0.1:8000/openapi.json> — opis kontraktów;
-- <http://127.0.0.1:8000/history/verdicts> — odczyt historii bez kosztu AI.
+- <http://127.0.0.1:8000/docs> - interaktywna dokumentacja FastAPI;
+- <http://127.0.0.1:8000/openapi.json> - opis kontraktów;
+- <http://127.0.0.1:8000/history/verdicts> - odczyt historii bez kosztu AI.
 
 Sam adres `/` zwraca 404: projekt nie ma tam strony startowej ani endpointu
 `/health`. Nie oznacza to awarii backendu.
@@ -199,13 +199,13 @@ jako plik `.py` i uruchom wskazanym interpreterem.
 
 ### 4.1. Gdzie umieścić klucze
 
-| Zastosowanie | Miejsce konfiguracji | Kto odczytuje klucz |
-| --- | --- | --- |
-| Przycisk `Analize` w rozszerzeniu | Pole `Twój klucz OpenAI` w popupie | Service worker, `chrome.storage.local.apiKey` |
-| Automatyczny Guardian / FastAPI | `backend/guardian/.env`: `OPENAI_API_KEY` | Proces backendu i CrewAI |
-| Benchmarki OpenAI | Zmienna procesu `OPENAI_API_KEY` | CLI benchmarku |
-| Benchmarki Google | Zmienna procesu `GEMINI_API_KEY` | Adapter wskazany przez kampanię |
-| Streamlit / eksport statyczny | Brak klucza | Czytają gotowe pliki lokalne |
+| Zastosowanie                      | Miejsce konfiguracji                      | Kto odczytuje klucz                           |
+| --------------------------------- | ----------------------------------------- | --------------------------------------------- |
+| Przycisk `Analize` w rozszerzeniu | Pole `Twój klucz OpenAI` w popupie        | Service worker, `chrome.storage.local.apiKey` |
+| Automatyczny Guardian / FastAPI   | `backend/guardian/.env`: `OPENAI_API_KEY` | Proces backendu i CrewAI                      |
+| Benchmarki OpenAI                 | Zmienna procesu `OPENAI_API_KEY`          | CLI benchmarku                                |
+| Benchmarki Google                 | Zmienna procesu `GEMINI_API_KEY`          | Adapter wskazany przez kampanię               |
+| Streamlit / eksport statyczny     | Brak klucza                               | Czytają gotowe pliki lokalne                  |
 
 Klucz wpisany w popupie nie konfiguruje backendu. Wpis w `.env` backendu nie
 konfiguruje popupu. W trybie Guardian ręczny przycisk `Analize` nadal używa
@@ -354,12 +354,12 @@ rozszerzenia, jeśli Chrome udostępnia tę opcję.
 
 Tryb domyślny to `Limited`. Nazwy w interfejsie i klucze pamięci różnią się:
 
-| Tryb popupu | Wartość `autonomyLevel` | Zachowanie |
-| --- | --- | --- |
-| `Limited` | `limited` | Lokalna analiza zaznaczenia i oznaczanie fraz; przycisk AI jest nieaktywny |
-| `Manual` | `standard` | Zaznaczenie tekstu i ręczne wywołanie OpenAI przyciskiem `Analize` |
-| `Automatic` | `full` | Automatyczne lokalne podświetlenia i kontrola zwykłego kliknięcia w ryzykowny link; AI uruchamiane przyciskiem |
-| `Guardian` | `guardian` | Funkcje lokalne oraz automatyczne zapytania do CrewAI dla wybranych zakresów treści |
+| Tryb popupu | Wartość `autonomyLevel` | Zachowanie                                                                                                     |
+| ----------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `Limited`   | `limited`               | Lokalna analiza zaznaczenia i oznaczanie fraz; przycisk AI jest nieaktywny                                     |
+| `Manual`    | `standard`              | Zaznaczenie tekstu i ręczne wywołanie OpenAI przyciskiem `Analize`                                             |
+| `Automatic` | `full`                  | Automatyczne lokalne podświetlenia i kontrola zwykłego kliknięcia w ryzykowny link; AI uruchamiane przyciskiem |
+| `Guardian`  | `guardian`              | Funkcje lokalne oraz automatyczne zapytania do CrewAI dla wybranych zakresów treści                            |
 
 Tryb `Automatic` nie wysyła sam wszystkich wiadomości do modelu. Guardian
 może wykonywać takie zapytania automatycznie i wymaga działającego backendu.
@@ -375,7 +375,7 @@ kart używających tej instalacji rozszerzenia.
 3. Na stronie zaznacz tekst wiadomości. Obok zaznaczenia pojawi się ikona.
 4. Kliknij ikonę, aby otworzyć panel `Phishing Guard`.
 5. `Catched phrases` pokazuje liczbę wykrytych fraz z lokalnego słownika.
-6. Kliknij `Analize` — taka pisownia występuje obecnie w interfejsie.
+6. Kliknij `Analize` - taka pisownia występuje obecnie w interfejsie.
 7. Poczekaj na wynik: `trustScore`, werdykt, pewność, uzasadnienie i kategorie.
 
 W `Manual` wysyłany jest widoczny tekst zaznaczonego zakresu wraz z sygnałami
@@ -418,7 +418,7 @@ do `/guardian/analyze`. Zasłania wiadomość tylko wtedy, gdy jednocześnie:
 
 Tarcza zawiera uzasadnienie oraz przycisk **Pokaż mimo to**. Odsłonięcie dotyczy
 konkretnej wersji wiadomości; zmiana treści, linku lub polityki może wymagać
-ponownej oceny. Wiadomość pozostaje na stronie i w skrzynce — rozszerzenie
+ponownej oceny. Wiadomość pozostaje na stronie i w skrzynce - rozszerzenie
 zmienia jej widoczność w DOM, nie usuwa poczty u dostawcy.
 
 Pozostałe wyniki niebezpieczne wywołują ostrzeżenie. `safe` nie wymaga
@@ -564,15 +564,15 @@ frazę, niezgodny link lub podejrzaną domenę. Z polityką rozpoznane zakresy
 mogą być analizowane także bez tych sygnałów. Wcześniej zasłonięta
 wiadomość może być sprawdzana ponownie po zmianie DOM.
 
-| Mechanizm | Wartość w implementacji |
-| --- | --- |
-| Jednoczesne analizy Crew | Maksymalnie 2 na instancję content scriptu |
-| Limit uruchomień | Maksymalnie 8 w ruchomym oknie 60 sekund na instancję |
-| Odstęp planowania skanu | 750 ms |
-| Cache werdyktów | Do 100 wpisów w pamięci danej strony |
-| Ponowienie po błędzie | Cooldown 60 sekund dla fingerprintu |
-| Timeout transportu Guardiana | 120 sekund, obejmuje odczyt odpowiedzi |
-| Tekst Guardiana | Do 8000 znaków; dłuższy tekst zachowuje początek i koniec w proporcji około 60/40 |
+| Mechanizm                    | Wartość w implementacji                                                           |
+| ---------------------------- | --------------------------------------------------------------------------------- |
+| Jednoczesne analizy Crew     | Maksymalnie 2 na instancję content scriptu                                        |
+| Limit uruchomień             | Maksymalnie 8 w ruchomym oknie 60 sekund na instancję                             |
+| Odstęp planowania skanu      | 750 ms                                                                            |
+| Cache werdyktów              | Do 100 wpisów w pamięci danej strony                                              |
+| Ponowienie po błędzie        | Cooldown 60 sekund dla fingerprintu                                               |
+| Timeout transportu Guardiana | 120 sekund, obejmuje odczyt odpowiedzi                                            |
+| Tekst Guardiana              | Do 8000 znaków; dłuższy tekst zachowuje początek i koniec w proporcji około 60/40 |
 
 Fingerprint obejmuje tożsamość wiadomości, kanonizowaną treść, linki i
 rewizję polityki. Odpowiedź dla starej wiadomości lub starej polityki nie
@@ -585,11 +585,11 @@ Timeout przeglądarki nie gwarantuje anulowania już rozpoczętej pracy serwera.
 [`crew.py`](../backend/guardian/src/guardian_classic/crew.py) używa `@CrewBase`,
 konfiguracji YAML i `Process.sequential`:
 
-| Kolejność zadania | Agent | Wejście i rezultat |
-| --- | --- | --- |
-| `badanie_domen_task` | `analityk_domen` | Domeny oraz lista uznanych za oficjalne; raport z narzędzi |
+| Kolejność zadania     | Agent             | Wejście i rezultat                                                                 |
+| --------------------- | ----------------- | ---------------------------------------------------------------------------------- |
+| `badanie_domen_task`  | `analityk_domen`  | Domeny oraz lista uznanych za oficjalne; raport z narzędzi                         |
 | `analiza_tresci_task` | `analityk_tresci` | Niezaufany JSON z treścią i sygnałami, opcjonalna polityka; analiza oznak oszustwa |
-| `synteza_task` | `orkiestrator` | Kontekst dwóch wcześniejszych zadań; końcowy `GuardianVerdict` |
+| `synteza_task`        | `orkiestrator`    | Kontekst dwóch wcześniejszych zadań; końcowy `GuardianVerdict`                     |
 
 To proces sekwencyjny z końcowym agentem syntetyzującym wyniki. Nie jest
 skonfigurowany jako `Process.hierarchical`. Ostatnie zadanie ma
@@ -608,22 +608,22 @@ nie należy przypisywać ich produktowemu endpointowi.
 
 ### 7.5. Mapa plików
 
-| Plik/katalog | Odpowiedzialność |
-| --- | --- |
-| `manifest.json` | Manifest V3, uprawnienia, content script i worker |
-| `src/content.ts`, `selection.ts`, `highlight.ts`, `widget.ts` | Uruchamianie lokalnych funkcji i interfejs na stronie |
-| `src/analysisScope.ts`, `domVisibility.ts`, `ownUi.ts` | Zakres treści, widoczność i rozpoznawanie własnego UI |
-| `src/links.ts`, `linkRisk.ts`, `suspiciousDomain.ts`, `phrases.ts` | Reguły detekcji |
-| `src/agent.ts` | Automatyczny Guardian, cache, limity i zasłanianie |
-| `src/background.ts`, `messages.ts`, `results.ts` | Transport, kontrakty i prezentacja wyników |
-| `src/organizationPolicy.ts`, `popup.ts` | Import i weryfikacja polityki, ustawienia |
-| `src/guardianAudit.ts`, `dashboard.ts` | Audyt i historia |
-| `backend/main.py`, `guardian_api.py` | Serwer HTTP i integracja CrewAI |
-| `backend/history.py`, `database.py` | SQLite i endpointy historii |
-| `backend/guardian/src/guardian_classic/` | Agenci, zadania, narzędzia i cache domen |
-| `benchmarks/phishing_bench/` | Kontrakty eksperymentów, adaptery, scoring i porównania |
-| `benchmarks/dashboard/` | Streamlit, walidator eksportu i wykresy |
-| `benchmarks/results/` | Wersjonowane wyniki dostępne po sklonowaniu |
+| Plik/katalog                                                       | Odpowiedzialność                                        |
+| ------------------------------------------------------------------ | ------------------------------------------------------- |
+| `manifest.json`                                                    | Manifest V3, uprawnienia, content script i worker       |
+| `src/content.ts`, `selection.ts`, `highlight.ts`, `widget.ts`      | Uruchamianie lokalnych funkcji i interfejs na stronie   |
+| `src/analysisScope.ts`, `domVisibility.ts`, `ownUi.ts`             | Zakres treści, widoczność i rozpoznawanie własnego UI   |
+| `src/links.ts`, `linkRisk.ts`, `suspiciousDomain.ts`, `phrases.ts` | Reguły detekcji                                         |
+| `src/agent.ts`                                                     | Automatyczny Guardian, cache, limity i zasłanianie      |
+| `src/background.ts`, `messages.ts`, `results.ts`                   | Transport, kontrakty i prezentacja wyników              |
+| `src/organizationPolicy.ts`, `popup.ts`                            | Import i weryfikacja polityki, ustawienia               |
+| `src/guardianAudit.ts`, `dashboard.ts`                             | Audyt i historia                                        |
+| `backend/main.py`, `guardian_api.py`                               | Serwer HTTP i integracja CrewAI                         |
+| `backend/history.py`, `database.py`                                | SQLite i endpointy historii                             |
+| `backend/guardian/src/guardian_classic/`                           | Agenci, zadania, narzędzia i cache domen                |
+| `benchmarks/phishing_bench/`                                       | Kontrakty eksperymentów, adaptery, scoring i porównania |
+| `benchmarks/dashboard/`                                            | Streamlit, walidator eksportu i wykresy                 |
+| `benchmarks/results/`                                              | Wersjonowane wyniki dostępne po sklonowaniu             |
 
 <a id="8-api-i-dane"></a>
 
@@ -631,14 +631,14 @@ nie należy przypisywać ich produktowemu endpointowi.
 
 ### 8.1. Endpointy
 
-| Metoda i ścieżka | Działanie |
-| --- | --- |
-| `POST /guardian/analyze` | Uruchamia CrewAI, zwraca werdykt; może generować koszt API |
-| `POST /history/save` | Zapisuje wynik analizy |
-| `GET /history/trust-score` | Punkty czasowe i trust score |
-| `GET /history/verdicts` | Liczby `safe`, `suspicious`, `phishing` |
-| `GET /history/categories` | Liczby sześciu kategorii |
-| `GET /docs`, `GET /openapi.json` | Dokumentacja i schemat API |
+| Metoda i ścieżka                 | Działanie                                                  |
+| -------------------------------- | ---------------------------------------------------------- |
+| `POST /guardian/analyze`         | Uruchamia CrewAI, zwraca werdykt; może generować koszt API |
+| `POST /history/save`             | Zapisuje wynik analizy                                     |
+| `GET /history/trust-score`       | Punkty czasowe i trust score                               |
+| `GET /history/verdicts`          | Liczby `safe`, `suspicious`, `phishing`                    |
+| `GET /history/categories`        | Liczby sześciu kategorii                                   |
+| `GET /docs`, `GET /openapi.json` | Dokumentacja i schemat API                                 |
 
 Backend nie udostępnia obecnie `/analyze`, `/health`, endpointu usuwania
 historii ani mechanizmu logowania. Jedna baza historii jest współdzielona
@@ -687,13 +687,13 @@ poziom zagrożenia. `reasoning` jest krótkim uzasadnieniem przeznaczonym do
 wyświetlenia. Dozwolone kategorie to `credential_request`, `urgency`,
 `impersonation`, `suspicious_link`, `suspicious_domain`, `financial`.
 
-| Pole wejściowe | Limit API |
-| --- | --- |
-| `content` | 8000 znaków |
-| `domains`, `trustedDomains` | Po 20 elementów, do 253 znaków; kanoniczny hostname DNS lub adres IP |
-| `phrases` | 50 elementów, po 200 znaków |
-| `linkMismatches` | 50 elementów; `text` do 200 i `href` do 2048 znaków |
-| `organizationPolicy` | Treść do 50 KiB UTF-8, `.md`/`.txt`, nazwa do 255 znaków, hash SHA-256 i zgodny rozmiar |
+| Pole wejściowe              | Limit API                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| `content`                   | 8000 znaków                                                                             |
+| `domains`, `trustedDomains` | Po 20 elementów, do 253 znaków; kanoniczny hostname DNS lub adres IP                    |
+| `phrases`                   | 50 elementów, po 200 znaków                                                             |
+| `linkMismatches`            | 50 elementów; `text` do 200 i `href` do 2048 znaków                                     |
+| `organizationPolicy`        | Treść do 50 KiB UTF-8, `.md`/`.txt`, nazwa do 255 znaków, hash SHA-256 i zgodny rozmiar |
 
 Nieznane pola `GuardianRequest` są odrzucane. Zły typ lub przekroczony limit
 zwykle daje HTTP 422. Awaria Crew, brak strukturalnego wyniku albo brak
@@ -703,15 +703,15 @@ curl nie zapisuje historii; zapis wykonuje worker rozszerzenia osobnym
 
 ### 8.3. Gdzie są przechowywane dane
 
-| Miejsce | Zawartość i czas przechowywania |
-| --- | --- |
-| `chrome.storage.local` | `enabled`, `autonomyLevel`, `apiKey`, aktywna polityka i `guardianAuditLog` |
-| `guardianAuditLog` | Do 100 najnowszych wpisów; URL, działanie, uzasadnienie, kategorie, polityka i skrót treści do 180 znaków plus wielokropek |
-| Pamięć content scriptu | Cache decyzji, fingerprinty, stan odsłonięć i limitów; nie jest trwałą bazą między przeładowaniami strony |
-| `backend/history.db` | Czas, trust score, werdykt, confidence, reasoning, kategorie; bez automatycznej retencji |
-| `backend/guardian/.cache/registration_cache.db` | Znormalizowana domena, rejestracja, źródło/status i metadane cache |
-| `benchmark-runs/` | Lokalne wyniki pomiarów, próby, manifesty, ledger i scoring |
-| `benchmarks/results/` | Sprawdzony eksport syntetycznych wyników do współdzielenia w Git |
+| Miejsce                                         | Zawartość i czas przechowywania                                                                                            |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `chrome.storage.local`                          | `enabled`, `autonomyLevel`, `apiKey`, aktywna polityka i `guardianAuditLog`                                                |
+| `guardianAuditLog`                              | Do 100 najnowszych wpisów; URL, działanie, uzasadnienie, kategorie, polityka i skrót treści do 180 znaków plus wielokropek |
+| Pamięć content scriptu                          | Cache decyzji, fingerprinty, stan odsłonięć i limitów; nie jest trwałą bazą między przeładowaniami strony                  |
+| `backend/history.db`                            | Czas, trust score, werdykt, confidence, reasoning, kategorie; bez automatycznej retencji                                   |
+| `backend/guardian/.cache/registration_cache.db` | Znormalizowana domena, rejestracja, źródło/status i metadane cache                                                         |
+| `benchmark-runs/`                               | Lokalne wyniki pomiarów, próby, manifesty, ledger i scoring                                                                |
+| `benchmarks/results/`                           | Sprawdzony eksport syntetycznych wyników do współdzielenia w Git                                                           |
 
 Audyt i uzasadnienia mogą zawierać fragment analizowanej wiadomości. Mimo że
 baza historii nie ma osobnej kolumny z pełną treścią, nie należy traktować
@@ -825,13 +825,13 @@ Lokalne katalogi `charts*` pod `benchmarks/results/` są ignorowane przez Git.
 CLI ma cztery podkomendy: `validate`, `run`, `score`, `compare`.
 Nie uruchamia się go przez `crewai test` ani przez serwer FastAPI.
 
-| Operacja | Wywołania modeli | Wymagane dane |
-| --- | --- | --- |
-| `validate` | Nie | Kampania, dataset, prompty, schematy i polityka decyzji |
-| `run` bez `--live` | Nie; raport dry-run, bez generowania wyników modelu | Jak wyżej |
-| `run --live --confirm-campaign ...` | Tak | Jak wyżej oraz klucz w środowisku procesu |
-| `score` | Nie | Kompletny katalog runu i osobny plik etykiet |
-| `compare` | Nie | Co najmniej dwa ocenione runy jakościowe i etykiety |
+| Operacja                            | Wywołania modeli                                    | Wymagane dane                                           |
+| ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------- |
+| `validate`                          | Nie                                                 | Kampania, dataset, prompty, schematy i polityka decyzji |
+| `run` bez `--live`                  | Nie; raport dry-run, bez generowania wyników modelu | Jak wyżej                                               |
+| `run --live --confirm-campaign ...` | Tak                                                 | Jak wyżej oraz klucz w środowisku procesu               |
+| `score`                             | Nie                                                 | Kompletny katalog runu i osobny plik etykiet            |
+| `compare`                           | Nie                                                 | Co najmniej dwa ocenione runy jakościowe i etykiety     |
 
 Direct wysyła zapytania przez adapter providera. `CrewAI Offline` nadal
 wywołuje zdalny model, ale używa zamrożonych danych domenowych: nie robi
@@ -860,7 +860,7 @@ Dry-run pokazuje konfigurację, hashe oraz rezerwację budżetu, a nie
 zmierzone F1 czy koszt już wykonanych zapytań. Brak katalogu wyników po
 dry-runie jest oczekiwany.
 
-### 10.3. Własna para Direct/CrewAI — nowe identyfikatory
+### 10.3. Własna para Direct/CrewAI - nowe identyfikatory
 
 Poniższy przykład tworzy cztery konfiguracje oparte na istniejących profilach
 GPT-4o Mini: smoke dla 5 próbek i pilot dla 30 próbek, osobno Direct/CrewAI.
@@ -912,18 +912,18 @@ wersjonowanego katalogu `benchmarks/campaigns/` i zacommituj przed pomiarem.
 Limity skopiowanych profili:
 
 | Konfiguracja | Próbek | Maks. attempts | Limit USD w lokalnym ledgerze | Limit czasu |
-| --- | --- | --- | --- | --- |
-| Direct smoke | 5 | 10 | 0,05 | 900 s |
-| CrewAI smoke | 5 | 15 | 0,05 | 900 s |
-| Direct pilot | 30 | 60 | 0,25 | 7200 s |
-| CrewAI pilot | 30 | 90 | 0,25 | 7200 s |
+| ------------ | ------ | -------------- | ----------------------------- | ----------- |
+| Direct smoke | 5      | 10             | 0,05                          | 900 s       |
+| CrewAI smoke | 5      | 15             | 0,05                          | 900 s       |
+| Direct pilot | 30     | 60             | 0,25                          | 7200 s      |
+| CrewAI pilot | 30     | 90             | 0,25                          | 7200 s      |
 
 Wspólny model to `gpt-4o-mini-2024-07-18`, a limit outputu wynosi 500 tokenów
 na wywołanie. Direct dopuszcza do jednego retry na próbkę, CrewAI nie
 ponawia; CrewAI planuje trzy wywołania na workflow. Limity ledgerowe są
 wartościami konfiguracji, a nie obietnicą rachunku dostawcy. Sprawdź aktualną
 dostępność modelu, ceny i budżet konta przed płatnym pomiarem. Przy zmianie
-cen trzeba zaktualizować obsługiwany kontrakt eksperymentu — samo ręczne
+cen trzeba zaktualizować obsługiwany kontrakt eksperymentu - samo ręczne
 zmienienie ceny w JSON może zostać odrzucone przez walidator.
 
 ### 10.4. Walidacja własnych konfiguracji
@@ -1183,35 +1183,35 @@ lub portu wymaga spójnej zmiany tych miejsc, buildu i przeładowania Chrome.
 
 ## 12. Rozwiązywanie problemów
 
-| Objaw | Co sprawdzić lub wykonać |
-| --- | --- |
-| Chrome zgłasza brak `dist/content.js` albo `dist/background.js` | `npm ci`, `npm run build`, potem przeładowanie rozszerzenia |
-| Chrome nie znajduje manifestu | Wybierz katalog główny repozytorium, nie `dist/`, `src/` ani `backend/` |
-| Po buildzie nadal działa stary kod | Odśwież rozszerzenie na `chrome://extensions`, potem stronę z content scriptem |
-| Brak ikony zaznaczenia na `chrome://...` | Testuj zwykłą stronę HTTP/HTTPS; sprawdź ograniczenia stron wewnętrznych |
-| `Analize` jest nieaktywny | Zmień `Limited` na `Manual`, `Automatic` albo `Guardian` |
-| Ręczna analiza zgłasza brak klucza | Wpisz klucz w popupie, opuść pole i sprawdź zapis przez ponowne otwarcie |
-| Guardian nie łączy się z backendem | Sprawdź terminal Uvicorn oraz `http://127.0.0.1:8000/docs` |
-| `OpenAI returned status 401` | Sprawdź klucz właściwego toru; popup i `.env` są niezależne |
-| HTTP 429 od modelu | Sprawdź limity API, dostępny budżet i liczbę aktywnych kart; limit Guardiana jest per strona |
-| HTTP 500 z `/guardian/analyze` | Odczytaj błąd w terminalu backendu; sprawdź klucz, model, zależności i strukturalny output |
-| HTTP 422 | Sprawdź pola JSON, limity, hostnames, hash i rozmiar polityki w `/docs` |
-| `Guardian analysis timed out.` | Worker czeka do 120 s; sprawdź obciążenie, wywołania modelu i narzędzia domenowe w backendzie |
-| `Could not fetch the data` w dashboardzie historii | API, port, CORS i ID rozszerzenia; to nie jest dashboard Streamlit |
-| Strona `/` backendu zwraca 404 | Otwórz `/docs` albo `/history/verdicts`; `/` nie jest zdefiniowane |
-| `ModuleNotFoundError: guardian_classic` | Zainstaluj projekt przez `uv sync` i wrapper z `backend/requirements.txt`; użyj właściwego interpretera |
-| `ModuleNotFoundError: history` lub `guardian_api` | Uruchamiaj Uvicorn z katalogu `backend/` |
-| `uvicorn`/`sqlmodel` zniknęły po `uv sync` | Ponownie zainstaluj wymagania wrappera do `backend/guardian/.venv` |
-| Błąd Pythona 3.14 | Wybierz Python 3.13; Guardian deklaruje `<3.14` |
-| Błąd polityki lub SHA-256 | Usuń albo wczytaj poprawny plik w popupie; nie poprawiaj ręcznie samych hashy |
-| Streamlit zgłasza brak pakietu | Zainstaluj `benchmarks/dashboard/requirements.txt` w środowisku używanym do jego uruchomienia |
-| Streamlit zgłasza niezgodny hash | Odtwórz kompletny oryginalny eksport; ręczna edycja CSV np. w Excelu zmienia bajty |
-| Port 8501 zajęty | Dodaj `--server.port=8502` przed separatorem `--` |
-| `LIVE_BLOCKED` | Stara kampania jest zamknięta; użyj nowego, obsługiwanego profilu i ID zgodnie z sekcją 10 |
-| `unsupported ... campaign ID` / `... drift` | Dany profil jest ściśle walidowany; edycja samego JSON nie wystarcza |
-| Brak rezultatów po `benchmark_cli.py run` | Bez `--live` to wyłącznie dry-run |
-| Scorer odrzuca run | Użyj kompletnego niezmienionego katalogu i właściwych etykiet smoke/pilot |
-| Eksporter zgłasza niepusty output | Podaj nowy katalog przez `--output-dir` |
+| Objaw                                                           | Co sprawdzić lub wykonać                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Chrome zgłasza brak `dist/content.js` albo `dist/background.js` | `npm ci`, `npm run build`, potem przeładowanie rozszerzenia                                             |
+| Chrome nie znajduje manifestu                                   | Wybierz katalog główny repozytorium, nie `dist/`, `src/` ani `backend/`                                 |
+| Po buildzie nadal działa stary kod                              | Odśwież rozszerzenie na `chrome://extensions`, potem stronę z content scriptem                          |
+| Brak ikony zaznaczenia na `chrome://...`                        | Testuj zwykłą stronę HTTP/HTTPS; sprawdź ograniczenia stron wewnętrznych                                |
+| `Analize` jest nieaktywny                                       | Zmień `Limited` na `Manual`, `Automatic` albo `Guardian`                                                |
+| Ręczna analiza zgłasza brak klucza                              | Wpisz klucz w popupie, opuść pole i sprawdź zapis przez ponowne otwarcie                                |
+| Guardian nie łączy się z backendem                              | Sprawdź terminal Uvicorn oraz `http://127.0.0.1:8000/docs`                                              |
+| `OpenAI returned status 401`                                    | Sprawdź klucz właściwego toru; popup i `.env` są niezależne                                             |
+| HTTP 429 od modelu                                              | Sprawdź limity API, dostępny budżet i liczbę aktywnych kart; limit Guardiana jest per strona            |
+| HTTP 500 z `/guardian/analyze`                                  | Odczytaj błąd w terminalu backendu; sprawdź klucz, model, zależności i strukturalny output              |
+| HTTP 422                                                        | Sprawdź pola JSON, limity, hostnames, hash i rozmiar polityki w `/docs`                                 |
+| `Guardian analysis timed out.`                                  | Worker czeka do 120 s; sprawdź obciążenie, wywołania modelu i narzędzia domenowe w backendzie           |
+| `Could not fetch the data` w dashboardzie historii              | API, port, CORS i ID rozszerzenia; to nie jest dashboard Streamlit                                      |
+| Strona `/` backendu zwraca 404                                  | Otwórz `/docs` albo `/history/verdicts`; `/` nie jest zdefiniowane                                      |
+| `ModuleNotFoundError: guardian_classic`                         | Zainstaluj projekt przez `uv sync` i wrapper z `backend/requirements.txt`; użyj właściwego interpretera |
+| `ModuleNotFoundError: history` lub `guardian_api`               | Uruchamiaj Uvicorn z katalogu `backend/`                                                                |
+| `uvicorn`/`sqlmodel` zniknęły po `uv sync`                      | Ponownie zainstaluj wymagania wrappera do `backend/guardian/.venv`                                      |
+| Błąd Pythona 3.14                                               | Wybierz Python 3.13; Guardian deklaruje `<3.14`                                                         |
+| Błąd polityki lub SHA-256                                       | Usuń albo wczytaj poprawny plik w popupie; nie poprawiaj ręcznie samych hashy                           |
+| Streamlit zgłasza brak pakietu                                  | Zainstaluj `benchmarks/dashboard/requirements.txt` w środowisku używanym do jego uruchomienia           |
+| Streamlit zgłasza niezgodny hash                                | Odtwórz kompletny oryginalny eksport; ręczna edycja CSV np. w Excelu zmienia bajty                      |
+| Port 8501 zajęty                                                | Dodaj `--server.port=8502` przed separatorem `--`                                                       |
+| `LIVE_BLOCKED`                                                  | Stara kampania jest zamknięta; użyj nowego, obsługiwanego profilu i ID zgodnie z sekcją 10              |
+| `unsupported ... campaign ID` / `... drift`                     | Dany profil jest ściśle walidowany; edycja samego JSON nie wystarcza                                    |
+| Brak rezultatów po `benchmark_cli.py run`                       | Bez `--live` to wyłącznie dry-run                                                                       |
+| Scorer odrzuca run                                              | Użyj kompletnego niezmienionego katalogu i właściwych etykiet smoke/pilot                               |
+| Eksporter zgłasza niepusty output                               | Podaj nowy katalog przez `--output-dir`                                                                 |
 
 Logi workera otworzysz przez link **service worker** na karcie rozszerzenia.
 Logi content scriptu znajdują się w DevTools analizowanej strony, a logi
