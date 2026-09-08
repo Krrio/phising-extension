@@ -1,69 +1,93 @@
-# GuardianClassic Crew
+# GuardianClassic — backend CrewAI
 
-Welcome to the GuardianClassic Crew project, powered by [crewAI](https://crewai.com). This template is designed to help you set up a multi-agent AI system with ease, leveraging the powerful and flexible framework provided by crewAI. Our goal is to enable your agents to collaborate effectively on complex tasks, maximizing their collective intelligence and capabilities.
+Pakiet `guardian_classic` zawiera trzech agentów używanych przez lokalny
+backend rozszerzenia Phishing Guard. Pełna instrukcja instalacji aplikacji,
+kluczy, Chrome, obsługi i benchmarków znajduje się w
+[Dokumentacji technicznej](../../docs/DOKUMENTACJA_TECHNICZNA.md).
 
-## Installation
+## Instalacja
 
-Ensure you have Python >=3.10 <3.14 installed on your system. This project uses [UV](https://docs.astral.sh/uv/) for dependency management and package handling, offering a seamless setup and execution experience.
-
-First, if you haven't already, install uv:
-
-```bash
-pip install uv
-```
-
-Next, navigate to your project directory and install the dependencies:
-
-(Optional) Lock the dependencies and install them by using the CLI command:
-```bash
-crewai install
-```
-### Customizing
-
-**Add your `OPENAI_API_KEY` into the `.env` file**
-
-- Modify `src/guardian_classic/config/agents.yaml` to define your agents
-- Modify `src/guardian_classic/config/tasks.yaml` to define your tasks
-- Modify `src/guardian_classic/crew.py` to add your own logic, tools and specific args
-- Modify `src/guardian_classic/main.py` to add custom inputs for your agents and tasks
-
-## Running the Project
-
-To kickstart your crew of AI agents and begin task execution, run this from the root folder of your project:
+Z katalogu głównego repozytorium, dla macOS/Linux:
 
 ```bash
-$ crewai run
+uv sync --project backend/guardian --locked --python 3.13
+cd backend
+uv pip install --python guardian/.venv/bin/python -r requirements.txt
 ```
 
-This command initializes the guardian_classic Crew, assembling the agents and assigning them tasks as defined in your configuration.
+Pakiet deklaruje Python `>=3.10,<3.14`. Instrukcja używa 3.13.
+`pyproject.toml` przypina `crewai[google-genai,tools]==1.15.8` oraz
+`google-genai==1.65.0`; zależności projektu odtwarza `uv.lock`.
+Wymagania wrappera FastAPI są w `backend/requirements.txt` i trzeba je
+zainstalować osobno z katalogu `backend/`.
 
-This example, unmodified, will run the create a `report.md` file with the output of a research on LLMs in the root folder.
+Na Windows ścieżkę `guardian/.venv/bin/python` zastąp przez
+`guardian/.venv/Scripts/python.exe`.
 
-## Domain registration cache
+## Klucz i uruchomienie
 
-The domain-age tool asks RDAP first and uses WHOIS only when the registry does
-not expose a usable registration date. Successful lookups and short-lived
-negative results are stored in SQLite at `.cache/registration_cache.db`.
-Override that path with `GUARDIAN_CACHE_DB=/path/to/cache.db`.
+Utwórz `backend/guardian/.env` według [szablonu](.env.example), jeżeli plik
+jeszcze nie istnieje. Ustaw własny `OPENAI_API_KEY` oraz `MODEL=gpt-4o-mini`.
+Nie nadpisuj istniejącego pliku z kluczem podczas kopiowania szablonu.
 
-The cache stores only the normalized registrable domain, registration timestamp,
-source, status and cache metadata; complete RDAP/WHOIS responses are not stored.
-Expired entries are pruned periodically, and LRU eviction keeps the cache below
-50,000 domains and keeps the complete SQLite file below 64 MiB. Maintenance
-runs at startup, at most once every six hours, or after 1,000 cache writes, so
-no separate cleanup process is required. The `.cache/` directory is
-intentionally ignored by Git.
+Z katalogu `backend/`:
 
-## Understanding Your Crew
+```bash
+uv run --project guardian --no-sync --env-file guardian/.env \
+  python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-The guardian_classic Crew is composed of multiple AI agents, each with unique roles, goals, and tools. These agents collaborate on a series of tasks, defined in `config/tasks.yaml`, leveraging their collective skills to achieve complex objectives. The `config/agents.yaml` file outlines the capabilities and configurations of each agent in your crew.
+`--env-file` udostępnia także ustawienia telemetryczne przed importem CrewAI.
+`--no-sync` zachowuje dodatkowe biblioteki wrappera. Opis API jest pod
+<http://127.0.0.1:8000/docs>. Zatrzymanie: `Ctrl+C`.
 
-## Support
+Klucz w popupie Chrome jest osobną konfiguracją dla ręcznego `Analize`.
+Backend nie pobiera go z przeglądarki. Benchmark CLI wymaga z kolei jawnego
+`OPENAI_API_KEY` lub `GEMINI_API_KEY` w środowisku procesu.
 
-For support, questions, or feedback regarding the GuardianClassic Crew or crewAI.
-- Visit our [documentation](https://docs.crewai.com)
-- Reach out to us through our [GitHub repository](https://github.com/joaomdmoura/crewai)
-- [Join our Discord](https://discord.com/invite/X4JWnZnxPb)
-- [Chat with our docs](https://chatg.pt/DWjSBZn)
+## Przebieg Crew
 
-Let's create wonders together with the power and simplicity of crewAI.
+`src/guardian_classic/crew.py` konfiguruje `Process.sequential`:
+
+1. `analityk_domen` wykonuje `badanie_domen_task`, korzystając z
+   `SuspiciousDomainTool` i `DomainAgeTool`.
+2. `analityk_tresci` wykonuje `analiza_tresci_task`, oceniając treść, sygnały
+   i opcjonalną politykę organizacji.
+3. `orkiestrator` wykonuje `synteza_task` na podstawie wcześniejszych
+   raportów i zwraca strukturalny `GuardianVerdict` przez Pydantic.
+
+Role i zadania są w `src/guardian_classic/config/agents.yaml` oraz
+`tasks.yaml`. FastAPI przygotowuje wejścia `domains_payload`,
+`untrusted_payload`, `policy_payload` i `trusted_domains`.
+
+`guardian_classic/main.py` nadal zawiera stare przykładowe wejścia szablonu.
+`crewai run`, `run_crew`, `train` i `test` z tego entrypointu nie są aktualną
+instrukcją uruchamiania rozszerzenia. Użyj FastAPI albo dedykowanego CLI
+benchmarku opisanego w dokumentacji głównej.
+
+## Cache domen
+
+Wiek domeny jest sprawdzany przez RDAP, z fallbackiem WHOIS, i cache'owany
+w `backend/guardian/.cache/registration_cache.db`. `GUARDIAN_CACHE_DB`
+pozwala wskazać inną ścieżkę.
+
+Cache zawiera domenę rejestrowalną, datę rejestracji, źródło, status i
+metadane, bez kompletnych odpowiedzi RDAP/WHOIS. Ma limit 50 000 domen i
+64 MiB, usuwa wygasłe wpisy i używa LRU. Konserwacja uruchamia się przy
+starcie, po upływie do sześciu godzin lub po 1000 zapisów. Osobny proces
+czyszczący nie jest potrzebny.
+
+## Testy i benchmarki
+
+Z katalogu głównego repozytorium:
+
+```bash
+backend/guardian/.venv/bin/python -m unittest discover -s backend/guardian/tests -v
+backend/guardian/.venv/bin/python benchmarks/benchmark_cli.py validate
+```
+
+Fabryka `benchmark_crew.py` jest osobna od produktowego Crew: korzysta z
+zamrożonego evidence domenowego i kontrolowanych wywołań modeli. Nazwa
+`CrewAI Offline` nie oznacza lokalnego modelu ani bezpłatnego live runu.
+Pełna procedura tworzenia kampanii, dry-runu, pomiaru, scoringu i porównania:
+[własne benchmarki](../../docs/DOKUMENTACJA_TECHNICZNA.md#10-wlasne-benchmarki).
