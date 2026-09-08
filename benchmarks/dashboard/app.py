@@ -59,8 +59,8 @@ except ImportError:  # Streamlit executes this file as a script.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_COMPARISON_DIR = (
     REPO_ROOT
-    / "benchmark-runs"
-    / "comparisons"
+    / "benchmarks"
+    / "results"
     / "FULL_EIGHT_ARM_PILOT_030_001"
 )
 PLOT_CONFIG = {

@@ -8,6 +8,10 @@
 > ograniczenia kolejnej serii do 1–2 adapterów. Historyczne wyniki poniżej
 > pozostają bez zmian i nie są przeznaczone do rerunu.
 
+Profesjonalny raport końcowy dla macierzy ośmiu wariantów, wraz z interpretacją
+wykresów, oceną każdego rozwiązania i rekomendacją finalistów, znajduje się w
+[`BENCHMARK_RESULTS_REPORT.md`](BENCHMARK_RESULTS_REPORT.md).
+
 ## Werdykt wobec specyfikacji z PDF
 
 Specyfikacja jest dobra jako przewodnik implementacyjny i zgadza się z normatywnym `BENCHMARK_SPEC.md`. Nie należy jednak zaczynać od 200 wiadomości ani traktować pięciu przykładów jako pomiaru jakości. Smoke `n=5` sprawdza przewód, a zamrożony pilot `n=30` daje pierwszy opisowy pomiar jakości w budżecie. Oba etapy mają status `ENGINEERING_PILOT` i żaden nie jest jeszcze rankingiem modeli.
@@ -867,6 +871,12 @@ instrukcja osobnego środowiska i zasady interpretacji znajdują się w
 [`dashboard/README.md`](dashboard/README.md). Dashboard działa offline na
 zweryfikowanych eksportach `compare`; nie wymaga kluczy API i nie należy
 instalować jego zależności do `backend/guardian/.venv`.
+
+Gotowe wyniki ośmiu wariantów są dołączone do repozytorium w
+[`results/FULL_EIGHT_ARM_PILOT_030_001/`](results/FULL_EIGHT_ARM_PILOT_030_001/).
+Dashboard domyślnie czyta ten zestaw, więc działa także po świeżym klonowaniu,
+bez lokalnego `benchmark-runs/` i bez płatnych wywołań modeli. Zawartość i
+pochodzenie pakietu opisuje [`results/README.md`](results/README.md).
 
 Statusy końcowe:
 

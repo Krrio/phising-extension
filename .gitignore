@@ -56,7 +56,8 @@ Thumbs.db
 *.temp
 .cache/
 
-# Benchmark outputs and private datasets (only synthetic fixtures are tracked)
+# Local benchmark outputs and private datasets.
+# Reviewed synthetic comparison snapshots are stored in benchmarks/results/.
 benchmark-runs/
 benchmarks/private-data/
 benchmarks/private-scoring/

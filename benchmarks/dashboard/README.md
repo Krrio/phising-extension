@@ -1,19 +1,36 @@
 # Guardian AI Benchmark Dashboard
 
+Pełny raport opisowy macierzy ośmiu wariantów, wraz z interpretacją wykresów i
+rekomendacją następnego etapu, znajduje się w
+[`../BENCHMARK_RESULTS_REPORT.md`](../BENCHMARK_RESULTS_REPORT.md).
+
 Lokalny, read-only dashboard dla katalogów utworzonych przez
 `benchmark_cli.py compare`. Czyta wyłącznie pięć zweryfikowanych artefaktów:
 `runs.csv`, `cases.csv`, `pairwise.csv`, `comparison.json` i `report.md`.
 Nie wykonuje requestów do modeli, nie potrzebuje kluczy API i nie czyta
 surowych treści e-maili, promptów ani reasoning.
 
+Repozytorium zawiera gotowy zestaw wyników w
+[`../results/FULL_EIGHT_ARM_PILOT_030_001/`](../results/FULL_EIGHT_ARM_PILOT_030_001/).
+Jest to domyślne porównanie 8 wariantów na 30 syntetycznych próbkach. Po
+sklonowaniu repozytorium dashboard działa bez lokalnego `benchmark-runs/`
+i bez ponownego uruchamiania benchmarków.
+
 ## 1. Jednorazowe przygotowanie środowiska
 
-W zwykłym Terminalu macOS:
+W terminalu, z katalogu głównego sklonowanego repozytorium:
 
 ```bash
-cd /Users/kacperjozwik/Development/phishing-extension
 conda create -n guardian-viz python=3.13 -y
 conda activate guardian-viz
+python -m pip install -r benchmarks/dashboard/requirements.txt
+```
+
+Bez Condy można użyć Pythona 3.13 i osobnego venv (macOS/Linux):
+
+```bash
+python3.13 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r benchmarks/dashboard/requirements.txt
 ```
 
@@ -22,25 +39,32 @@ pozostaje zamrożonym środowiskiem runnera benchmarków.
 
 ## 2. Uruchomienie dashboardu
 
-```bash
-cd /Users/kacperjozwik/Development/phishing-extension
-conda activate guardian-viz
-unset OPENAI_API_KEY GEMINI_API_KEY
+Z katalogu głównego repozytorium, po aktywowaniu środowiska `guardian-viz`
+lub `.venv`:
 
+```bash
 python -m streamlit run benchmarks/dashboard/app.py \
   --server.address=127.0.0.1 \
-  --browser.gatherUsageStats=false \
-  -- \
-  --comparison-dir benchmark-runs/comparisons/FULL_EIGHT_ARM_PILOT_030_001
+  --browser.gatherUsageStats=false
 ```
 
 Otwórz `http://127.0.0.1:8501`. Serwer działa tylko na loopbacku. Zatrzymaj go
-przez `Ctrl+C`, a środowisko wyłącz poleceniem `conda deactivate`.
+przez `Ctrl+C`, a środowisko wyłącz poleceniem `conda deactivate` (Conda)
+lub `deactivate` (venv).
 
-Jeżeli port 8501 jest zajęty, dodaj przed separatorem `--`:
+Jeżeli port 8501 jest zajęty, dodaj opcję:
 
 ```text
 --server.port=8502
+```
+
+Aby obejrzeć własny eksport `compare`, wskaż go po separatorze `--`:
+
+```bash
+python -m streamlit run benchmarks/dashboard/app.py \
+  --server.address=127.0.0.1 \
+  --browser.gatherUsageStats=false \
+  -- --comparison-dir benchmark-runs/comparisons/MOJE_POROWNANIE
 ```
 
 ## 3. Zakładki
@@ -61,13 +85,13 @@ W tym samym środowisku:
 
 ```bash
 python benchmarks/dashboard/export_static.py \
-  --comparison-dir benchmark-runs/comparisons/FULL_EIGHT_ARM_PILOT_030_001
+  --comparison-dir benchmarks/results/FULL_EIGHT_ARM_PILOT_030_001
 ```
 
 Pierwsze uruchomienie tworzy:
 
 ```text
-benchmark-runs/comparisons/FULL_EIGHT_ARM_PILOT_030_001/charts/
+benchmarks/results/FULL_EIGHT_ARM_PILOT_030_001/charts/
 ├── 01_f1.{png,svg}
 ├── 02_fpr.{png,svg}
 ├── 03_cost_per_message.{png,svg}
@@ -84,9 +108,11 @@ użyj nowej ścieżki:
 
 ```bash
 python benchmarks/dashboard/export_static.py \
-  --comparison-dir benchmark-runs/comparisons/FULL_EIGHT_ARM_PILOT_030_001 \
-  --output-dir benchmark-runs/comparisons/FULL_EIGHT_ARM_PILOT_030_001/charts_v2
+  --comparison-dir benchmarks/results/FULL_EIGHT_ARM_PILOT_030_001 \
+  --output-dir benchmarks/results/FULL_EIGHT_ARM_PILOT_030_001/charts_v2
 ```
+
+Wygenerowane katalogi `charts*` są ignorowane przez Git.
 
 ## 5. Zasady interpretacji
 
@@ -113,6 +139,8 @@ Hashe potwierdzają wewnętrzną spójność lokalnego eksportu i wykrywają prz
 zmianę plików. Nie są podpisem cyfrowym: źródłem zaufania nadal jest zachowany,
 audytowany katalog `compare` oraz jego provenance.
 
-`benchmark-runs/` jest ignorowany przez Git. Kod dashboardu można commitować,
-ale eksporty i wykresy trzeba zabezpieczyć osobno. Nie używaj `git add -f` dla
-całego katalogu wyników.
+`benchmark-runs/` jest ignorowany przez Git. Sprawdzony eksport syntetycznego
+pilota w `benchmarks/results/` jest przeznaczony do wersjonowania razem z
+kodem dashboardu. Szczegóły zawartości, pochodzenia i weryfikacji opisuje
+[`../results/README.md`](../results/README.md). Nowe eksporty przeznaczone do
+udostępnienia dodawaj tam jako osobne, sprawdzone zestawy pięciu artefaktów.

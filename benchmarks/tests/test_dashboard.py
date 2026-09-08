@@ -21,6 +21,7 @@ from dashboard.analytics import (  # noqa: E402
 )
 from dashboard.data_loader import (  # noqa: E402
     REQUIRED_CASE_COLUMNS,
+    REQUIRED_FILES,
     REQUIRED_PAIRWISE_COLUMNS,
     REQUIRED_RUN_COLUMNS,
     DashboardDataError,
@@ -328,17 +329,21 @@ class DashboardLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(DashboardDataError, "symlinkiem"):
                 load_comparison_bundle(fixture.root)
 
-    def test_real_full_export_when_available(self) -> None:
+    def test_bundled_full_export_is_self_contained(self) -> None:
         directory = (
-            REPO_ROOT
-            / "benchmark-runs"
-            / "comparisons"
+            BENCHMARKS_DIR
+            / "results"
             / "FULL_EIGHT_ARM_PILOT_030_001"
         )
-        if not directory.exists():
-            self.skipTest("local ignored benchmark export is not available")
-
-        bundle = load_comparison_bundle(directory)
+        # A fresh checkout has the five published artifacts, without local runs.
+        with tempfile.TemporaryDirectory() as temporary:
+            relocated = Path(temporary) / "repo z wynikami"
+            relocated.mkdir()
+            for file_name in REQUIRED_FILES:
+                (relocated / file_name).write_bytes(
+                    (directory / file_name).read_bytes()
+                )
+            bundle = load_comparison_bundle(relocated)
 
         self.assertEqual(len(bundle.runs), 8)
         self.assertEqual(len(bundle.cases), 240)

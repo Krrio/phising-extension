@@ -1,0 +1,4 @@
+# Artifact SHA-256 values must survive checkout, including core.autocrlf=true.
+**/*.csv -text
+**/comparison.json -text
+**/report.md -text
